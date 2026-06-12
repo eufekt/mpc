@@ -1,0 +1,15 @@
+{
+  "name": "mpc",
+  "private": true,
+  "workspaces": [
+    "apps/*"
+  ],
+  "scripts": {
+    "dev": "concurrently -n web,api -c white,black \"npm run dev -w @mpc/web\" \"npm run dev -w @mpc/api\"",
+    "build": "npm run build -w @mpc/web",
+    "typecheck": "npm run typecheck -w @mpc/web && npm run typecheck -w @mpc/api"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.2"
+  }
+}
