@@ -102,6 +102,7 @@ export default function App() {
           return c;
         }),
       );
+      setSelectedChopId(null);
       setStatus(`chop bound to ${upper}`);
     },
     [selectedChopId],
@@ -154,13 +155,22 @@ export default function App() {
       const key = event.key.toLowerCase();
       if (key.length !== 1 || key < "a" || key > "z") return;
 
+      const chop = chops.find((c) => c.key?.toLowerCase() === key);
+      if (chop?.id === selectedChopId) {
+        event.preventDefault();
+        flashPad(key.toUpperCase());
+        playChop(chop);
+        setSelectedChopId(null);
+        return;
+      }
+
       event.preventDefault();
       bindKeyToSelectedChop(key);
     };
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [selectedChopId, bindKeyToSelectedChop]);
+  }, [selectedChopId, bindKeyToSelectedChop, chops, flashPad, playChop]);
 
   const handleLoadFile = async (file: File) => {
     setStatus("loading...");
@@ -195,11 +205,19 @@ export default function App() {
   };
 
   const handlePadClick = (key: string) => {
+    const chop = chops.find((c) => c.key?.toUpperCase() === key);
+
     if (selectedChopId) {
+      if (chop?.id === selectedChopId) {
+        flashPad(key);
+        playChop(chop);
+        setSelectedChopId(null);
+        return;
+      }
       bindKeyToSelectedChop(key);
       return;
     }
-    const chop = chops.find((c) => c.key?.toUpperCase() === key);
+
     if (chop) {
       flashPad(key);
       playChop(chop);
