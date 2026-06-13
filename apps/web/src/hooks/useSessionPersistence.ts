@@ -1,83 +1,37 @@
-import { useEffect, useRef } from "react";
-import type { PaletteMode } from "../lib/chopColors";
+import { useEffect, useMemo, useRef } from "react";
 import {
-  buildSessionMeta,
-  loadAudioBlob,
-  loadSessionMeta,
-  saveAudioBlob,
-  saveSessionMeta,
+  loadLegacyAudioBlob,
+  loadSessionState,
+  loadTrackAudio,
+  migrateLegacyBlobToTrack,
+  saveSessionState,
+  saveTrackAudio,
 } from "../lib/sessionPersistence";
-import type { Chop, PadMode, SourceType } from "../lib/types";
+import type { SessionState } from "../lib/types";
 import type { useAudioEngine } from "./useAudioEngine";
+import type { useSessionState } from "./useSessionState";
 
 type Engine = ReturnType<typeof useAudioEngine>;
+type SessionApi = ReturnType<typeof useSessionState>;
 
 type Params = {
   engine: Engine;
-  chops: Chop[];
-  paletteMode: PaletteMode;
-  padMode: PadMode;
-  sourceType: SourceType | null;
-  sourceUrl: string | null;
-  hasAudio: boolean;
-  setChops: (chops: Chop[]) => void;
-  setPaletteMode: (mode: PaletteMode) => void;
-  setPadMode: (mode: PadMode) => void;
-  setSourceType: (type: SourceType | null) => void;
-  setSourceUrl: (url: string | null) => void;
+  session: SessionState;
+  restoreSession: SessionApi["restoreSession"];
+  setVolume: SessionApi["setVolume"];
   onStatus: (message: string | null) => void;
 };
 
-function saveCurrentSession(
-  engine: Engine,
-  params: {
-    sourceType: SourceType;
-    sourceUrl: string | null;
-    chops: Chop[];
-    paletteMode: PaletteMode;
-    padMode: PadMode;
-  },
-) {
-  if (!engine.sourceName) return;
-  saveSessionMeta(
-    buildSessionMeta({
-      sourceType: params.sourceType,
-      sourceName: engine.sourceName,
-      sourceUrl: params.sourceUrl ?? undefined,
-      chops: params.chops,
-      paletteMode: params.paletteMode,
-      padMode: params.padMode,
-      volume: engine.volume,
-    }),
-  );
-}
-
 export function useSessionPersistence({
   engine,
-  chops,
-  paletteMode,
-  padMode,
-  sourceType,
-  sourceUrl,
-  hasAudio,
-  setChops,
-  setPaletteMode,
-  setPadMode,
-  setSourceType,
-  setSourceUrl,
+  session,
+  restoreSession,
+  setVolume,
   onStatus,
 }: Params) {
   const isRestoringRef = useRef(false);
-  const chopsRef = useRef(chops);
-  const paletteModeRef = useRef(paletteMode);
-  const padModeRef = useRef(padMode);
-  const sourceTypeRef = useRef(sourceType);
-  const sourceUrlRef = useRef(sourceUrl);
-  chopsRef.current = chops;
-  paletteModeRef.current = paletteMode;
-  padModeRef.current = padMode;
-  sourceTypeRef.current = sourceType;
-  sourceUrlRef.current = sourceUrl;
+  const sessionRef = useRef(session);
+  sessionRef.current = session;
 
   useEffect(() => {
     const abort = new AbortController();
@@ -90,8 +44,8 @@ export function useSessionPersistence({
     };
 
     (async () => {
-      const meta = loadSessionMeta();
-      if (!meta) return;
+      const saved = loadSessionState();
+      if (!saved || saved.tracks.length === 0) return;
 
       isRestoringRef.current = true;
       onStatus("restoring session...");
@@ -100,37 +54,58 @@ export function useSessionPersistence({
         await engine.resume();
         if (abort.signal.aborted) return;
 
-        let blob = await loadAudioBlob();
+        const legacyBlob = await loadLegacyAudioBlob();
+        const migratedFromV1 = legacyBlob !== null;
+
+        for (const track of saved.tracks) {
+          if (abort.signal.aborted) return;
+
+          let blob = await loadTrackAudio(track.id);
+
+          if (!blob && migratedFromV1 && track.id === saved.tracks[0]?.id) {
+            blob = legacyBlob;
+            await migrateLegacyBlobToTrack(track.id);
+          }
+
+          if (
+            !blob &&
+            track.sourceType === "youtube" &&
+            track.sourceUrl
+          ) {
+            blob = await engine.loadYouTubeUrl(track.id, track.sourceUrl);
+            if (abort.signal.aborted) return;
+            await saveTrackAudio(track.id, blob);
+            continue;
+          }
+
+          if (blob) {
+            const arrayBuffer = await blob.arrayBuffer();
+            if (abort.signal.aborted) return;
+            await engine.loadTrackAudio(
+              track.id,
+              arrayBuffer,
+              track.sourceName,
+            );
+          }
+        }
+
         if (abort.signal.aborted) return;
 
-        if (!blob && meta.sourceType === "youtube" && meta.sourceUrl) {
-          blob = await engine.loadYouTubeUrl(meta.sourceUrl);
-          if (abort.signal.aborted) return;
-          await saveAudioBlob(blob);
-        } else if (blob) {
-          const arrayBuffer = await blob.arrayBuffer();
-          if (abort.signal.aborted) return;
-          await engine.loadArrayBuffer(arrayBuffer, meta.sourceName);
-        } else {
+        const anyLoaded = saved.tracks.some((t) => engine.hasTrack(t.id));
+        if (!anyLoaded) {
           onStatus("restore failed: audio missing — reload your file or url");
           clearStatusLater();
           return;
         }
 
-        if (abort.signal.aborted) return;
-
-        setSourceType(meta.sourceType);
-        setSourceUrl(meta.sourceUrl ?? null);
-        setPaletteMode(meta.paletteMode);
-        setPadMode(meta.padMode);
-        setChops(meta.chops);
-        engine.setVolume(meta.volume);
+        restoreSession(saved);
+        setVolume(saved.volume);
+        engine.setVolume(saved.volume);
         onStatus("session restored");
         clearStatusLater();
       } catch (e) {
         if (abort.signal.aborted) return;
-        const message =
-          e instanceof Error ? e.message : "unknown error";
+        const message = e instanceof Error ? e.message : "unknown error";
         onStatus(`restore failed: ${message}`);
         clearStatusLater();
       } finally {
@@ -149,53 +124,49 @@ export function useSessionPersistence({
     // eslint-disable-next-line react-hooks/exhaustive-deps -- restore once on mount
   }, []);
 
-  useEffect(() => {
-    if (isRestoringRef.current) return;
-    if (!hasAudio || !sourceType || !engine.sourceName) return;
-    saveCurrentSession(engine, {
-      sourceType,
-      sourceUrl,
-      chops,
-      paletteMode,
-      padMode,
-    });
-  }, [chops, paletteMode, padMode, sourceType, sourceUrl, hasAudio, engine.sourceName]);
+  const structuralSessionKey = useMemo(
+    () =>
+      JSON.stringify({
+        version: session.version,
+        tracks: session.tracks,
+        paletteMode: session.paletteMode,
+        padMode: session.padMode,
+        volume: session.volume,
+      }),
+    [
+      session.version,
+      session.tracks,
+      session.paletteMode,
+      session.padMode,
+      session.volume,
+    ],
+  );
 
   useEffect(() => {
     if (isRestoringRef.current) return;
-    if (!hasAudio || !sourceType || !engine.sourceName) return;
+    if (session.tracks.length === 0) return;
+    if (!session.tracks.some((t) => engine.hasTrack(t.id))) return;
+    saveSessionState(session);
+  }, [structuralSessionKey, engine.loadedTrackIds, session]);
+
+  useEffect(() => {
+    if (isRestoringRef.current) return;
+    if (session.tracks.length === 0) return;
+    if (!session.tracks.some((t) => engine.hasTrack(t.id))) return;
 
     const timer = window.setTimeout(() => {
-      saveCurrentSession(engine, {
-        sourceType,
-        sourceUrl,
-        chops: chopsRef.current,
-        paletteMode: paletteModeRef.current,
-        padMode: padModeRef.current,
-      });
+      saveSessionState(sessionRef.current);
     }, 300);
 
     return () => window.clearTimeout(timer);
-  }, [engine.volume, hasAudio, sourceType, engine.sourceName]);
+  }, [session.activeTrackId, session.volume, engine.loadedTrackIds]);
 
-  const persistAudio = async (
-    blob: Blob,
-    type: SourceType,
-    url: string | null,
-  ) => {
-    await saveAudioBlob(blob);
-    sourceTypeRef.current = type;
-    sourceUrlRef.current = url;
-    if (engine.sourceName) {
-      saveCurrentSession(engine, {
-        sourceType: type,
-        sourceUrl: url,
-        chops: chopsRef.current,
-        paletteMode: paletteModeRef.current,
-        padMode: padModeRef.current,
-      });
+  const persistTrackAudio = async (trackId: string, blob: Blob) => {
+    await saveTrackAudio(trackId, blob);
+    if (sessionRef.current.tracks.length > 0) {
+      saveSessionState(sessionRef.current);
     }
   };
 
-  return { persistAudio };
+  return { persistTrackAudio };
 }

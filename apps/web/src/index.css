@@ -66,6 +66,18 @@ input[type="text"] {
   max-width: 100%;
 }
 
+.app-header {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: -16px -16px 0;
+  padding: 0 16px;
+}
+
+.app-header h1 {
+  line-height: 1.2;
+}
+
 .play-mode-bar {
   position: sticky;
   top: 0;
@@ -75,15 +87,13 @@ input[type="text"] {
   gap: 8px;
   background: #fff;
   border-bottom: 1px solid #000;
-  padding-bottom: 8px;
-  margin: -16px -16px 0;
-  padding: 8px 16px;
+  margin: 0 -16px;
+  padding: 4px 16px;
 }
 
 .volume,
 .palette-toggle,
 .pad-mode-toggle,
-.chop-selection,
 .transport {
   flex-direction: row;
   align-items: center;
@@ -99,21 +109,95 @@ input[type="color"] {
   cursor: pointer;
 }
 
+.chop-color-cell {
+  position: relative;
+}
+
 .chop-color-swatch {
   display: inline-block;
   width: 12px;
   height: 12px;
+  padding: 0;
   border: 1px solid #000;
   vertical-align: middle;
+  cursor: pointer;
 }
 
 tr.selected .chop-color-swatch {
   border-color: #fff;
 }
 
+.chop-color-popover {
+  position: absolute;
+  left: 0;
+  top: calc(100% + 2px);
+  z-index: 10;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px;
+  width: 72px;
+  padding: 4px;
+  background: #fff;
+  border: 1px solid #000;
+}
+
+.chop-color-option {
+  width: 14px;
+  height: 14px;
+  padding: 0;
+  border: 1px solid #000;
+  cursor: pointer;
+}
+
+.chop-color-option[aria-current="true"] {
+  outline: 2px solid #000;
+  outline-offset: 1px;
+}
+
+.chop-color-custom input[type="color"] {
+  display: block;
+  width: 14px;
+  height: 14px;
+  border: 1px solid #000;
+}
+
 input[type="range"] {
   width: 160px;
   accent-color: #000;
+}
+
+.chop-volume {
+  width: 72px;
+  vertical-align: middle;
+}
+
+.chop-volume-value {
+  display: inline-block;
+  min-width: 2ch;
+  margin-left: 4px;
+  font-size: 12px;
+  vertical-align: middle;
+}
+
+.chop-delete-cell {
+  text-align: center;
+  vertical-align: middle;
+  width: 1%;
+  padding: 4px;
+}
+
+.chop-delete-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  line-height: 1;
+}
+
+.chop-delete-btn svg {
+  display: block;
 }
 
 button {
@@ -228,4 +312,100 @@ pre {
 .pad.looping {
   background: #000;
   color: #fff;
+}
+
+.track-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.track-list li {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.tracks-trigger {
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+}
+
+.track-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 24px 16px;
+  overflow-y: auto;
+  background: rgba(255, 255, 255, 0.9);
+}
+
+.track-modal {
+  width: 100%;
+  max-width: 900px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  border: 2px solid #000;
+  background: #fff;
+  padding: 16px;
+}
+
+.track-modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.track-modal-header h2 {
+  margin: 0;
+}
+
+.track-list li.active button:first-child:not(:disabled) {
+  font-weight: bold;
+}
+
+.timeline-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.track-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  border: 1px solid #000;
+  padding: 8px;
+}
+
+.track-panel.active {
+  border-width: 2px;
+}
+
+.track-panel-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.track-panel-title {
+  font-weight: bold;
+  text-transform: uppercase;
+}
+
+.track-panel-transport {
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }

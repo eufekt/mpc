@@ -1,13 +1,30 @@
+function connectWithGain(
+  context: AudioContext,
+  source: AudioBufferSourceNode,
+  destination: AudioNode,
+  volume: number,
+) {
+  if (volume === 1) {
+    source.connect(destination);
+    return;
+  }
+  const gain = context.createGain();
+  gain.gain.value = volume;
+  source.connect(gain);
+  gain.connect(destination);
+}
+
 export function playSlice(
   context: AudioContext,
   buffer: AudioBuffer,
   start: number,
   end: number,
   destination: AudioNode,
+  volume = 1,
 ): AudioBufferSourceNode {
   const source = context.createBufferSource();
   source.buffer = buffer;
-  source.connect(destination);
+  connectWithGain(context, source, destination, volume);
   const duration = Math.max(0, end - start);
   source.start(0, start, duration);
   return source;
@@ -33,13 +50,14 @@ export function playSliceLoop(
   start: number,
   end: number,
   destination: AudioNode,
+  volume = 1,
 ): AudioBufferSourceNode {
   const source = context.createBufferSource();
   source.buffer = buffer;
   source.loop = true;
   source.loopStart = start;
   source.loopEnd = end;
-  source.connect(destination);
+  connectWithGain(context, source, destination, volume);
   source.start(0, start);
   return source;
 }

@@ -1,6 +1,6 @@
 import { useCallback, useRef, useState } from "react";
 import { playFrom, playSlice, playSliceLoop } from "../lib/sliceAudioBuffer";
-import type { PadMode } from "../lib/types";
+import type { ChopPlayRequest, PadMode } from "../lib/types";
 
 function stopSource(source: AudioBufferSourceNode) {
   try {
@@ -11,6 +11,7 @@ function stopSource(source: AudioBufferSourceNode) {
 }
 
 type ActivePlayback = {
+  trackId: string;
   start: number;
   end: number;
   startedAt: number;
@@ -19,27 +20,44 @@ type ActivePlayback = {
   kind: "chop" | "track";
 };
 
+type TrackTransport = {
+  seekTime: number;
+  isPlaying: boolean;
+  source: AudioBufferSourceNode | null;
+};
+
+type LoopState = {
+  padKey: string;
+  sources: Array<{ trackId: string; source: AudioBufferSourceNode }>;
+};
+
+function padSourceKey(trackId: string, padKey: string): string {
+  return `${trackId}:${padKey.toLowerCase()}`;
+}
+
+// Web Audio nodes live in refs; React state only mirrors what the UI needs.
 export function useAudioEngine() {
   const contextRef = useRef<AudioContext | null>(null);
   const gainNodeRef = useRef<GainNode | null>(null);
-  const bufferRef = useRef<AudioBuffer | null>(null);
-  const [sourceName, setSourceName] = useState<string | null>(null);
+  const buffersRef = useRef<Map<string, AudioBuffer>>(new Map());
+  const trackNamesRef = useRef<Map<string, string>>(new Map());
+  const [loadedTrackIds, setLoadedTrackIds] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const volumeRef = useRef(1);
   const [volume, setVolumeState] = useState(1);
   const padSourcesRef = useRef<Map<string, AudioBufferSourceNode>>(new Map());
-  const loopRef = useRef<{
-    key: string;
-    source: AudioBufferSourceNode;
-  } | null>(null);
+  const loopRef = useRef<LoopState | null>(null);
   const activePlaybackRef = useRef<ActivePlayback | null>(null);
-  const trackSourceRef = useRef<AudioBufferSourceNode | null>(null);
-  const seekTimeRef = useRef(0);
-  const [seekTime, setSeekTimeState] = useState(0);
-  const [playbackEpoch, setPlaybackEpoch] = useState(0);
+  const chopPlaybackRef = useRef<Map<string, ActivePlayback>>(new Map());
+  const transportRef = useRef<Map<string, TrackTransport>>(new Map());
+  const [transportVersion, setTransportVersion] = useState(0);
+
   const [loopingKey, setLoopingKey] = useState<string | null>(null);
-  const [isTrackPlaying, setIsTrackPlaying] = useState(false);
+
+  const bumpTransport = useCallback(() => {
+    setTransportVersion((n) => n + 1);
+  }, []);
 
   const getContext = useCallback(() => {
     if (!contextRef.current) {
@@ -69,71 +87,136 @@ export function useAudioEngine() {
     }
   }, [getContext]);
 
-  const stopPad = useCallback((padKey: string) => {
-    const key = padKey.toLowerCase();
+  const getTransport = useCallback((trackId: string): TrackTransport => {
+    let transport = transportRef.current.get(trackId);
+    if (!transport) {
+      transport = { seekTime: 0, isPlaying: false, source: null };
+      transportRef.current.set(trackId, transport);
+    }
+    return transport;
+  }, []);
+
+  const stopPad = useCallback((trackId: string, padKey: string) => {
+    const key = padSourceKey(trackId, padKey);
     const existing = padSourcesRef.current.get(key);
     if (!existing) return;
     stopSource(existing);
     padSourcesRef.current.delete(key);
   }, []);
 
-  const pauseTrack = useCallback(() => {
-    const active = activePlaybackRef.current;
-    const ctx = contextRef.current;
-    if (active?.kind === "track" && ctx) {
-      const elapsed = ctx.currentTime - active.startedAt;
-      const pausedAt = Math.min(active.end, active.start + elapsed);
-      seekTimeRef.current = pausedAt;
-      setSeekTimeState(pausedAt);
-    }
+  const pauseTrack = useCallback(
+    (trackId: string) => {
+      const active = activePlaybackRef.current;
+      const ctx = contextRef.current;
+      const transport = getTransport(trackId);
 
-    const source = trackSourceRef.current;
-    if (source) {
-      stopSource(source);
-      trackSourceRef.current = null;
-    }
-    setIsTrackPlaying(false);
-    if (activePlaybackRef.current?.kind === "track") {
-      activePlaybackRef.current = null;
-    }
-  }, []);
+      if (active?.kind === "track" && active.trackId === trackId && ctx) {
+        const elapsed = ctx.currentTime - active.startedAt;
+        const pausedAt = Math.min(active.end, active.start + elapsed);
+        transport.seekTime = pausedAt;
+      }
+
+      if (transport.source) {
+        stopSource(transport.source);
+        transport.source = null;
+      }
+      transport.isPlaying = false;
+
+      if (
+        activePlaybackRef.current?.kind === "track" &&
+        activePlaybackRef.current.trackId === trackId
+      ) {
+        activePlaybackRef.current = null;
+      }
+      bumpTransport();
+    },
+    [getTransport, bumpTransport],
+  );
 
   const stopLoop = useCallback(() => {
     const loop = loopRef.current;
     if (!loop) return;
-    stopSource(loop.source);
+    for (const { trackId, source } of loop.sources) {
+      stopSource(source);
+      const chopPlayback = chopPlaybackRef.current.get(trackId);
+      if (chopPlayback?.source === source) {
+        chopPlaybackRef.current.delete(trackId);
+      }
+    }
     loopRef.current = null;
     setLoopingKey(null);
-    if (activePlaybackRef.current?.source === loop.source) {
-      activePlaybackRef.current = null;
+    if (activePlaybackRef.current?.kind === "chop") {
+      const activeSource = activePlaybackRef.current.source;
+      if (loop.sources.some((s) => s.source === activeSource)) {
+        activePlaybackRef.current = null;
+      }
     }
   }, []);
 
-  const stopAllPads = useCallback(() => {
+  const stopAllPadsForTrack = useCallback(
+    (trackId: string) => {
+      for (const [key, source] of padSourcesRef.current.entries()) {
+        if (key.startsWith(`${trackId}:`)) {
+          stopSource(source);
+          padSourcesRef.current.delete(key);
+        }
+      }
+    },
+    [],
+  );
+
+  const stopAllPlayback = useCallback(() => {
     stopLoop();
-    pauseTrack();
+    for (const trackId of transportRef.current.keys()) {
+      pauseTrack(trackId);
+    }
     for (const source of padSourcesRef.current.values()) {
       stopSource(source);
     }
     padSourcesRef.current.clear();
+    chopPlaybackRef.current.clear();
     if (activePlaybackRef.current?.kind === "chop") {
       activePlaybackRef.current = null;
     }
   }, [stopLoop, pauseTrack]);
 
-  const setSeekTime = useCallback((time: number) => {
-    const buffer = bufferRef.current;
-    const clamped = buffer
-      ? Math.max(0, Math.min(buffer.duration, time))
-      : Math.max(0, time);
-    seekTimeRef.current = clamped;
-    setSeekTimeState(clamped);
-  }, []);
+  const setSeekTime = useCallback(
+    (trackId: string, time: number) => {
+      const buffer = buffersRef.current.get(trackId);
+      const transport = getTransport(trackId);
+      transport.seekTime = buffer
+        ? Math.max(0, Math.min(buffer.duration, time))
+        : Math.max(0, time);
+      bumpTransport();
+    },
+    [getTransport, bumpTransport],
+  );
 
-  const getPlaybackTime = useCallback((): number | null => {
-    const active = activePlaybackRef.current;
+  const getSeekTime = useCallback(
+    (trackId: string): number => {
+      return getTransport(trackId).seekTime;
+    },
+    [getTransport],
+  );
+
+  const isTrackPlaying = useCallback(
+    (trackId: string): boolean => {
+      return getTransport(trackId).isPlaying;
+    },
+    [getTransport],
+  );
+
+  const getPlaybackTime = useCallback((trackId: string): number | null => {
     const ctx = contextRef.current;
-    if (!active || !ctx) return null;
+    if (!ctx) return null;
+
+    const chopPlayback = chopPlaybackRef.current.get(trackId);
+    const active = chopPlayback ?? (
+      activePlaybackRef.current?.trackId === trackId
+        ? activePlaybackRef.current
+        : null
+    );
+    if (!active) return null;
 
     const elapsed = ctx.currentTime - active.startedAt;
     const sliceLen = active.end - active.start;
@@ -150,49 +233,76 @@ export function useAudioEngine() {
     return time;
   }, []);
 
-  const decodeArrayBuffer = useCallback(
-    async (arrayBuffer: ArrayBuffer, name: string) => {
+  const loadTrackAudio = useCallback(
+    async (trackId: string, arrayBuffer: ArrayBuffer, name: string) => {
       setLoading(true);
       setError(null);
-      stopAllPads();
       try {
         await resume();
         const ctx = getContext();
         const decoded = await ctx.decodeAudioData(arrayBuffer.slice(0));
-        bufferRef.current = decoded;
-        setSourceName(name);
-        seekTimeRef.current = 0;
-        setSeekTimeState(0);
+        buffersRef.current.set(trackId, decoded);
+        trackNamesRef.current.set(trackId, name);
+        setLoadedTrackIds(Array.from(buffersRef.current.keys()));
+
+        const transport = getTransport(trackId);
+        transport.seekTime = 0;
+        transport.isPlaying = false;
+        if (transport.source) {
+          stopSource(transport.source);
+          transport.source = null;
+        }
+        bumpTransport();
       } catch (e) {
-        bufferRef.current = null;
-        setSourceName(null);
+        buffersRef.current.delete(trackId);
+        trackNamesRef.current.delete(trackId);
+        setLoadedTrackIds(Array.from(buffersRef.current.keys()));
         setError(e instanceof Error ? e.message : "decode failed");
         throw e;
       } finally {
         setLoading(false);
       }
     },
-    [getContext, resume, stopAllPads],
+    [getContext, resume, getTransport, bumpTransport],
   );
 
-  const loadArrayBuffer = useCallback(
-    async (arrayBuffer: ArrayBuffer, name: string) => {
-      await decodeArrayBuffer(arrayBuffer, name);
+  const unloadTrack = useCallback(
+    (trackId: string) => {
+      stopAllPadsForTrack(trackId);
+      pauseTrack(trackId);
+      buffersRef.current.delete(trackId);
+      trackNamesRef.current.delete(trackId);
+      transportRef.current.delete(trackId);
+      chopPlaybackRef.current.delete(trackId);
+      setLoadedTrackIds(Array.from(buffersRef.current.keys()));
+      bumpTransport();
     },
-    [decodeArrayBuffer],
+    [stopAllPadsForTrack, pauseTrack, bumpTransport],
   );
+
+  const hasTrack = useCallback((trackId: string): boolean => {
+    return buffersRef.current.has(trackId);
+  }, []);
+
+  const getBuffer = useCallback((trackId: string): AudioBuffer | null => {
+    return buffersRef.current.get(trackId) ?? null;
+  }, []);
+
+  const getTrackName = useCallback((trackId: string): string | null => {
+    return trackNamesRef.current.get(trackId) ?? null;
+  }, []);
 
   const loadFile = useCallback(
-    async (file: File) => {
+    async (trackId: string, file: File) => {
       const arrayBuffer = await file.arrayBuffer();
-      await decodeArrayBuffer(arrayBuffer, file.name);
+      await loadTrackAudio(trackId, arrayBuffer, file.name);
       return file;
     },
-    [decodeArrayBuffer],
+    [loadTrackAudio],
   );
 
   const loadYouTubeUrl = useCallback(
-    async (url: string) => {
+    async (trackId: string, url: string) => {
       setLoading(true);
       setError(null);
       try {
@@ -209,7 +319,7 @@ export function useAudioEngine() {
         if (arrayBuffer.byteLength < 44) {
           throw new Error("empty or invalid audio response from server");
         }
-        await decodeArrayBuffer(arrayBuffer, url);
+        await loadTrackAudio(trackId, arrayBuffer, url);
         return new Blob([arrayBuffer], { type: "audio/wav" });
       } catch (e) {
         setLoading(false);
@@ -217,173 +327,191 @@ export function useAudioEngine() {
         throw e;
       }
     },
-    [decodeArrayBuffer],
+    [loadTrackAudio],
   );
 
-  const playTrack = useCallback(async () => {
-    const buffer = bufferRef.current;
-    if (!buffer) return;
-    await resume();
-    const ctx = getContext();
-    const gain = gainNodeRef.current;
-    if (!gain) return;
-
-    pauseTrack();
-    stopLoop();
-
-    const from = seekTimeRef.current;
-    const remaining = buffer.duration - from;
-    if (remaining <= 0) return;
-
-    const source = playFrom(ctx, buffer, from, gain);
-    trackSourceRef.current = source;
-    const startedAt = ctx.currentTime;
-    activePlaybackRef.current = {
-      start: from,
-      end: buffer.duration,
-      startedAt,
-      source,
-      loop: false,
-      kind: "track",
-    };
-    setIsTrackPlaying(true);
-    setPlaybackEpoch((n) => n + 1);
-
-    source.onended = () => {
-      trackSourceRef.current = null;
-      setIsTrackPlaying(false);
-      if (activePlaybackRef.current?.source === source) {
-        activePlaybackRef.current = null;
-        seekTimeRef.current = buffer.duration;
-        setSeekTimeState(buffer.duration);
-      }
-    };
-  }, [getContext, resume, stopLoop, pauseTrack]);
-
-  const toggleTrackPlayback = useCallback(async () => {
-    if (isTrackPlaying) {
-      pauseTrack();
-      return;
-    }
-    await playTrack();
-  }, [isTrackPlaying, pauseTrack, playTrack]);
-
-  const playChop = useCallback(
-    async (
-      start: number,
-      end: number,
-      padKey: string,
-      mode: PadMode,
-    ) => {
-      const buffer = bufferRef.current;
+  const playTrack = useCallback(
+    async (trackId: string) => {
+      const buffer = buffersRef.current.get(trackId);
       if (!buffer) return;
       await resume();
       const ctx = getContext();
       const gain = gainNodeRef.current;
       if (!gain) return;
 
-      pauseTrack();
+      pauseTrack(trackId);
+      stopLoop();
 
-      const key = padKey.toLowerCase();
+      const transport = getTransport(trackId);
+      const from = transport.seekTime;
+      const remaining = buffer.duration - from;
+      if (remaining <= 0) return;
+
+      const source = playFrom(ctx, buffer, from, gain);
+      transport.source = source;
+      transport.isPlaying = true;
+      const startedAt = ctx.currentTime;
+      activePlaybackRef.current = {
+        trackId,
+        start: from,
+        end: buffer.duration,
+        startedAt,
+        source,
+        loop: false,
+        kind: "track",
+      };
+      bumpTransport();
+
+      source.onended = () => {
+        transport.source = null;
+        transport.isPlaying = false;
+        if (activePlaybackRef.current?.source === source) {
+          activePlaybackRef.current = null;
+          transport.seekTime = buffer.duration;
+        }
+        bumpTransport();
+      };
+    },
+    [getContext, resume, stopLoop, pauseTrack, getTransport, bumpTransport],
+  );
+
+  const toggleTrackPlayback = useCallback(
+    async (trackId: string) => {
+      if (getTransport(trackId).isPlaying) {
+        pauseTrack(trackId);
+        return;
+      }
+      await playTrack(trackId);
+    },
+    [getTransport, pauseTrack, playTrack],
+  );
+
+  const playChops = useCallback(
+    async (requests: ChopPlayRequest[], mode: PadMode) => {
+      if (requests.length === 0) return;
+
+      const padKey = requests[0].key.toLowerCase();
+      await resume();
+      const ctx = getContext();
+      const gain = gainNodeRef.current;
+      if (!gain) return;
+
+      const affectedTrackIds = new Set(requests.map((r) => r.trackId));
+      for (const trackId of affectedTrackIds) {
+        pauseTrack(trackId);
+      }
 
       if (mode === "loop") {
-        if (loopRef.current?.key === key) {
+        if (loopRef.current?.padKey === padKey) {
           stopLoop();
           return;
         }
         stopLoop();
-        stopPad(key);
+        for (const req of requests) {
+          stopPad(req.trackId, req.key);
+        }
 
-        const source = playSliceLoop(ctx, buffer, start, end, gain);
+        const sources: Array<{
+          trackId: string;
+          source: AudioBufferSourceNode;
+          req: ChopPlayRequest;
+        }> = [];
+        for (const req of requests) {
+          const buffer = buffersRef.current.get(req.trackId);
+          if (!buffer) continue;
+          const source = playSliceLoop(ctx, buffer, req.start, req.end, gain, req.volume);
+          sources.push({ trackId: req.trackId, source, req });
+        }
+        if (sources.length === 0) return;
+
+        loopRef.current = {
+          padKey,
+          sources: sources.map(({ trackId, source }) => ({ trackId, source })),
+        };
+        setLoopingKey(requests[0].key.toUpperCase());
+
         const startedAt = ctx.currentTime;
-        loopRef.current = { key, source };
-        setLoopingKey(padKey.toUpperCase());
-        activePlaybackRef.current = {
-          start,
-          end,
-          startedAt,
-          source,
-          loop: true,
-          kind: "chop",
-        };
-        setPlaybackEpoch((n) => n + 1);
-
-        source.onended = () => {
-          if (loopRef.current?.source === source) {
-            loopRef.current = null;
-            setLoopingKey(null);
-          }
-          if (activePlaybackRef.current?.source === source) {
-            activePlaybackRef.current = null;
-          }
-        };
+        for (const { trackId, source, req } of sources) {
+          chopPlaybackRef.current.set(trackId, {
+            trackId,
+            start: req.start,
+            end: req.end,
+            startedAt,
+            source,
+            loop: true,
+            kind: "chop",
+          });
+        }
         return;
       }
 
-      if (mode === "clear") {
-        stopPad(key);
-      }
+      for (const req of requests) {
+        const buffer = buffersRef.current.get(req.trackId);
+        if (!buffer) continue;
 
-      const source = playSlice(ctx, buffer, start, end, gain);
-      const startedAt = ctx.currentTime;
-      activePlaybackRef.current = {
-        start,
-        end,
-        startedAt,
-        source,
-        loop: false,
-        kind: "chop",
-      };
-      setPlaybackEpoch((n) => n + 1);
-
-      source.onended = () => {
-        if (activePlaybackRef.current?.source === source) {
-          activePlaybackRef.current = null;
+        if (mode === "clear") {
+          stopPad(req.trackId, req.key);
         }
-        if (mode === "clear" && padSourcesRef.current.get(key) === source) {
-          padSourcesRef.current.delete(key);
-        }
-      };
 
-      if (mode === "clear") {
-        padSourcesRef.current.set(key, source);
+        const source = playSlice(ctx, buffer, req.start, req.end, gain, req.volume);
+        const sourceKey = padSourceKey(req.trackId, req.key);
+        const startedAt = ctx.currentTime;
+        const playback: ActivePlayback = {
+          trackId: req.trackId,
+          start: req.start,
+          end: req.end,
+          startedAt,
+          source,
+          loop: false,
+          kind: "chop",
+        };
+        chopPlaybackRef.current.set(req.trackId, playback);
+
+        source.onended = () => {
+          const current = chopPlaybackRef.current.get(req.trackId);
+          if (current?.source === source) {
+            chopPlaybackRef.current.delete(req.trackId);
+          }
+          if (
+            mode === "clear" &&
+            padSourcesRef.current.get(sourceKey) === source
+          ) {
+            padSourcesRef.current.delete(sourceKey);
+          }
+        };
+
+        if (mode === "clear") {
+          padSourcesRef.current.set(sourceKey, source);
+        }
       }
     },
     [getContext, resume, stopLoop, stopPad, pauseTrack],
   );
 
-  const getBuffer = useCallback(() => bufferRef.current, []);
-
-  const clear = useCallback(() => {
-    stopAllPads();
-    bufferRef.current = null;
-    setSourceName(null);
-    setError(null);
-  }, [stopAllPads]);
-
   return {
-    sourceName,
     loading,
     error,
-    setError,
-    loadFile,
-    loadArrayBuffer,
-    loadYouTubeUrl,
-    playChop,
-    playTrack,
-    pauseTrack,
-    toggleTrackPlayback,
-    stopLoop,
-    loopingKey,
-    isTrackPlaying,
-    seekTime,
-    setSeekTime,
-    getBuffer,
-    clear,
-    resume,
     volume,
-    setVolume,
+    loadedTrackIds,
+    transportVersion,
+    loopingKey,
+    loadTrackAudio,
+    unloadTrack,
+    hasTrack,
+    getBuffer,
+    getTrackName,
+    loadFile,
+    loadYouTubeUrl,
+    playChops,
+    toggleTrackPlayback,
+    pauseTrack,
+    stopLoop,
+    stopAllPlayback,
+    isTrackPlaying,
+    getSeekTime,
+    setSeekTime,
     getPlaybackTime,
-    playbackEpoch,
+    resume,
+    setVolume,
   };
 }
