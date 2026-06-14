@@ -1,5 +1,7 @@
 import {
+  formatChopDisplayName,
   formatChopKey,
+  formatChopSummary,
   formatDuration,
   getChopOptionId,
   type ChopOption,
@@ -33,14 +35,16 @@ export function ChopPicker({ options, selectedKey, onSelect }: Props) {
             aria-selected={isSelected}
             className={`chop-picker-item${isSelected ? " selected" : ""}`}
             onClick={() => onSelect(isSelected ? "" : id)}
-            title={`#${option.chopIndex + 1} · ${formatDuration(option.duration)} · ${formatChopKey(option.chop)}`}
+            title={formatChopSummary(option)}
           >
             <span
               className="chop-picker-swatch"
               style={{ backgroundColor: option.chop.color }}
               aria-hidden
             />
-            <span className="chop-picker-number">#{option.chopIndex + 1}</span>
+            <span className="chop-picker-number">
+              {formatChopDisplayName(option.chop, option.chopIndex)}
+            </span>
             <span className="chop-picker-duration">
               {formatDuration(option.duration)}
             </span>

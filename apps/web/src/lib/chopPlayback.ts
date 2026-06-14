@@ -25,6 +25,10 @@ export function formatTimeStretch(value: number): string {
   return String(timeStretchToPercent(value));
 }
 
+export function getChopNaturalDuration(chop: { start: number; end: number }): number {
+  return Math.max(0, chop.end - chop.start);
+}
+
 export function getChopPlaybackDuration(
   naturalDuration: number,
   timeStretch: number,

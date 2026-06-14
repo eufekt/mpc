@@ -15,6 +15,7 @@ type Props = {
   selectedId: string | null;
   onSelect: (id: string) => void;
   onDelete: (id: string) => void;
+  onNameChange: (id: string, name: string) => void;
   onVolumeChange: (id: string, volume: number) => void;
   onTimeStretchChange: (id: string, timeStretch: number) => void;
   onColorChange: (id: string, color: string) => void;
@@ -26,6 +27,7 @@ export function ChopTable({
   selectedId,
   onSelect,
   onDelete,
+  onNameChange,
   onVolumeChange,
   onTimeStretchChange,
   onColorChange,
@@ -50,17 +52,27 @@ export function ChopTable({
   }
 
   return (
-    <table>
+    <table className="chop-table">
+      <colgroup>
+        <col className="chop-col-color" />
+        <col className="chop-col-name" />
+        <col className="chop-col-time" />
+        <col className="chop-col-time" />
+        <col className="chop-col-key" />
+        <col className="chop-col-vol" />
+        <col className="chop-col-spd" />
+        <col className="chop-col-delete" />
+      </colgroup>
       <thead>
         <tr>
-          <th></th>
-          <th>#</th>
-          <th>start</th>
-          <th>end</th>
-          <th>key</th>
-          <th>vol</th>
-          <th>spd</th>
-          <th></th>
+          <th className="chop-color-cell"></th>
+          <th className="chop-name-cell">#</th>
+          <th className="chop-time-cell">start</th>
+          <th className="chop-time-cell">end</th>
+          <th className="chop-key-cell">key</th>
+          <th className="chop-vol-cell">vol</th>
+          <th className="chop-spd-cell">spd</th>
+          <th className="chop-delete-cell"></th>
         </tr>
       </thead>
       <tbody>
@@ -116,29 +128,44 @@ export function ChopTable({
                 </div>
               )}
             </td>
-            <td>{index + 1}</td>
-            <td>{formatTimePrecise(chop.start)}</td>
-            <td>{formatTimePrecise(chop.end)}</td>
-            <td>{chop.key?.toUpperCase() ?? "—"}</td>
+            <td className="chop-name-cell">
+              <input
+                type="text"
+                className="chop-name-input"
+                value={chop.name ?? ""}
+                placeholder={String(index + 1)}
+                aria-label={`chop ${index + 1} name`}
+                onClick={(e) => e.stopPropagation()}
+                onPointerDown={(e) => e.stopPropagation()}
+                onChange={(e) => onNameChange(chop.id, e.target.value)}
+              />
+            </td>
+            <td className="chop-time-cell">{formatTimePrecise(chop.start)}</td>
+            <td className="chop-time-cell">{formatTimePrecise(chop.end)}</td>
+            <td className="chop-key-cell">{chop.key ?? "—"}</td>
             <td className="chop-volume-cell">
               <input
-                type="range"
-                className="chop-volume"
+                type="number"
+                className="chop-volume-input"
                 min={0}
                 max={100}
+                step={1}
                 value={Math.round(chop.volume * 100)}
                 aria-label={`chop ${index + 1} volume`}
                 onClick={(e) => e.stopPropagation()}
                 onChange={(e) => {
                   e.stopPropagation();
-                  onVolumeChange(chop.id, Number(e.target.value) / 100);
+                  const next = Number.parseInt(e.target.value, 10);
+                  if (Number.isFinite(next)) {
+                    onVolumeChange(
+                      chop.id,
+                      Math.min(100, Math.max(0, next)) / 100,
+                    );
+                  }
                 }}
               />
-              <span className="chop-volume-value">
-                {Math.round(chop.volume * 100)}
-              </span>
             </td>
-            <td>
+            <td className="chop-spd-cell">
               <input
                 type="number"
                 className="chop-stretch"

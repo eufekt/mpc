@@ -1,4 +1,4 @@
-const PAD_KEYS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ".split("");
+import { PAD_LETTERS } from "../lib/midi";
 
 type Props = {
   assignedKeys: Set<string>;
@@ -17,7 +17,7 @@ export function PadRow({
 }: Props) {
   return (
     <div className="pad-row">
-      {PAD_KEYS.map((key) => {
+      {PAD_LETTERS.map((key) => {
         const assigned = assignedKeys.has(key);
         const active = activeKey === key;
         const looping = loopingKey === key;

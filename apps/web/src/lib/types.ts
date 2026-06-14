@@ -5,6 +5,8 @@ export type Chop = {
   start: number;
   end: number;
   key: string | null;
+  /** Optional display name for the chop table # column. */
+  name?: string;
   color: string;
   volume: number;
   /** Playback speed multiplier — 1.000 = normal, 0.900 = 0.9× speed. */
@@ -17,6 +19,7 @@ export type PadMode = "layer" | "clear" | "loop";
 
 export type Track = {
   id: string;
+  name: string;
   sourceType: SourceType;
   sourceName: string;
   sourceUrl?: string;
@@ -49,6 +52,8 @@ export type ArrangementLane = {
 
 export type ArrangementState = {
   lanes: ArrangementLane[];
+  /** Pixel height of each timeline lane row (saved workspace preference). */
+  laneRowHeight: number;
 };
 
 export type SessionState = {
@@ -59,6 +64,7 @@ export type SessionState = {
   paletteMode: PaletteMode;
   padMode: PadMode;
   volume: number;
+  accentColor: string;
 };
 
 /** v2 layout — kept for migration from older saved sessions. */

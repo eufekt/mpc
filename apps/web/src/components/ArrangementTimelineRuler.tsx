@@ -1,8 +1,8 @@
 import {
   clipWidthPx,
   formatDuration,
-  pxToTime,
   rulerTickInterval,
+  seekTimeFromClientX,
   timeToPx,
 } from "../lib/arrangement";
 
@@ -21,8 +21,7 @@ export function ArrangementTimelineRuler({ duration, onSeek }: Props) {
   }
 
   const handleClick = (e: React.MouseEvent<HTMLDivElement>) => {
-    const rect = e.currentTarget.getBoundingClientRect();
-    onSeek(pxToTime(e.clientX - rect.left));
+    onSeek(seekTimeFromClientX(e.clientX, e.currentTarget));
   };
 
   return (

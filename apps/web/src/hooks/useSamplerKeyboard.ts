@@ -1,6 +1,6 @@
 import { useEffect, useRef } from "react";
 import { isLetterKey, isTypingTarget } from "../lib/keyboard";
-import { getChopsForKey } from "../lib/pads";
+import { resolvePadPress } from "../lib/pads";
 import type { Track } from "../lib/types";
 
 export type SelectedChop = {
@@ -60,34 +60,26 @@ export function useSamplerKeyboard({
       const key = event.key.toLowerCase();
       if (!isLetterKey(key)) return;
 
-      const selection = selectedChopRef.current;
+      const action = resolvePadPress({
+        tracks: tracksRef.current,
+        selectedChop: selectedChopRef.current,
+        key,
+        requirePlayMode: true,
+        playMode: playModeRef.current,
+        hasAudio: hasAudioRef.current,
+      });
 
-      if (selection) {
-        const track = tracksRef.current.find((t) => t.id === selection.trackId);
-        const chop = track?.chops.find((c) => c.id === selection.chopId);
-        if (
-          chop?.key?.toLowerCase() === key &&
-          getChopsForKey(tracksRef.current, key).some(
-            (b) => b.chop.id === selection.chopId,
-          )
-        ) {
-          event.preventDefault();
-          onPadPressRef.current?.(key.toUpperCase());
-          onPlayKeyRef.current(key);
-          return;
-        }
+      if (action === "noop") return;
 
-        event.preventDefault();
+      event.preventDefault();
+
+      if (action === "bind") {
+        const selection = selectedChopRef.current;
+        if (!selection) return;
         onBindKeyRef.current(selection.trackId, key);
         return;
       }
 
-      if (!hasAudioRef.current || !playModeRef.current) return;
-
-      const bound = getChopsForKey(tracksRef.current, key);
-      if (bound.length === 0) return;
-
-      event.preventDefault();
       onPadPressRef.current?.(key.toUpperCase());
       onPlayKeyRef.current(key);
     };

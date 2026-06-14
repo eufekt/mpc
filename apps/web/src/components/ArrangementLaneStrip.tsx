@@ -8,9 +8,9 @@ import {
   getClipLeftPx,
   getFreeClipOverlapState,
   playheadLeftPx,
-  pxToTime,
   pxDeltaToTime,
   resolveLaneClips,
+  seekTimeFromClientX,
 } from "../lib/arrangement";
 import type { ArrangementLane, Track } from "../lib/types";
 
@@ -88,8 +88,7 @@ export function ArrangementLaneStrip({
 
     const strip = stripRef.current;
     if (!strip) return;
-    const rect = strip.getBoundingClientRect();
-    const time = pxToTime(e.clientX - rect.left);
+    const time = seekTimeFromClientX(e.clientX, strip);
 
     const placing =
       isFree &&

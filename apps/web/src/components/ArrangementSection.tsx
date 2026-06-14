@@ -1,29 +1,30 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
+  clampLaneRowHeight,
   computeArrangementDuration,
+  computeTimelineLaneAreaHeight,
   computeTimelineScrollDuration,
   computeTimelineWidthPx,
+  filterLoadedTracks,
   formatDuration,
   getAllChops,
 } from "../lib/arrangement";
-import type { ArrangementLane, ArrangementLaneMode, Track } from "../lib/types";
+import type {
+  ArrangementClipStackMode,
+  ArrangementLane,
+  ArrangementLaneMode,
+  Track,
+} from "../lib/types";
 import { ArrangementChopBank } from "./ArrangementChopBank";
+import {
+  ArrangementLaneDialog,
+  type LaneDraft,
+} from "./ArrangementLaneDialog";
 import { ArrangementLanePanel } from "./ArrangementLanePanel";
 import { ArrangementLaneStrip } from "./ArrangementLaneStrip";
 import { ArrangementTimelineRuler } from "./ArrangementTimelineRuler";
 
-type Props = {
-  lanes: ArrangementLane[];
-  tracks: Track[];
-  loadedTrackIds: string[];
-  isPlaying: boolean;
-  playheadTime: number;
-  loop: boolean;
-  onPlay: () => void;
-  onStop: () => void;
-  onSeek: (time: number) => void;
-  onLoopChange: (loop: boolean) => void;
-  onAddLane: () => void;
+export type ArrangementActions = {
   onRemoveLane: (laneId: string) => void;
   onRenameLane: (laneId: string, name: string) => void;
   onSetMute: (laneId: string, mute: boolean) => void;
@@ -52,9 +53,34 @@ type Props = {
   onSetClipStackMode: (
     laneId: string,
     clipId: string,
-    stackMode: "clamp" | "overflow",
+    stackMode: ArrangementClipStackMode,
   ) => void;
 };
+
+type Props = {
+  lanes: ArrangementLane[];
+  tracks: Track[];
+  loadedTrackIds: string[];
+  isPlaying: boolean;
+  playheadTime: number;
+  loop: boolean;
+  transportFocused: boolean;
+  onFocusTransport: () => void;
+  onTogglePlay: () => void;
+  onStop: () => void;
+  onSeek: (time: number) => void;
+  onLoopChange: (loop: boolean) => void;
+  onAddLane: (draft: LaneDraft) => void;
+  laneRowHeight: number;
+  onLaneRowHeightChange: (height: number) => void;
+  actions: ArrangementActions;
+};
+
+const LANE_RESIZE_HANDLE_HEIGHT = 6;
+
+type LaneDialogState =
+  | { mode: "add" }
+  | { mode: "edit"; laneId: string };
 
 export function ArrangementSection({
   lanes,
@@ -63,29 +89,75 @@ export function ArrangementSection({
   isPlaying,
   playheadTime,
   loop,
-  onPlay,
+  transportFocused,
+  onFocusTransport,
+  onTogglePlay,
   onStop,
   onSeek,
   onLoopChange,
   onAddLane,
-  onRemoveLane,
-  onRenameLane,
-  onSetMute,
-  onSetVolume,
-  onSetLaneMode,
-  onAddClip,
-  onAddClipAt,
-  onRemoveClip,
-  onReorderClip,
-  onMoveClip,
-  onSetClipStackMode,
+  laneRowHeight,
+  onLaneRowHeightChange,
+  actions,
 }: Props) {
+  const {
+    onRemoveLane,
+    onRenameLane,
+    onSetMute,
+    onSetVolume,
+    onSetLaneMode,
+    onAddClip,
+    onAddClipAt,
+    onRemoveClip,
+    onReorderClip,
+    onMoveClip,
+    onSetClipStackMode,
+  } = actions;
+
   const [selectedLaneId, setSelectedLaneId] = useState<string | null>(null);
   const [selectedChopKey, setSelectedChopKey] = useState("");
   const [repeatCount, setRepeatCount] = useState(1);
+  const [laneDialog, setLaneDialog] = useState<LaneDialogState | null>(null);
+  const resizeStartRef = useRef({ y: 0, height: laneRowHeight });
+
+  const handleLaneResizePointerDown = useCallback(
+    (event: React.PointerEvent<HTMLDivElement>) => {
+      if (lanes.length === 0) return;
+      event.preventDefault();
+      event.stopPropagation();
+      const handle = event.currentTarget;
+      handle.setPointerCapture(event.pointerId);
+      resizeStartRef.current = { y: event.clientY, height: laneRowHeight };
+
+      const onMove = (ev: PointerEvent) => {
+        const delta = ev.clientY - resizeStartRef.current.y;
+        const next = clampLaneRowHeight(
+          resizeStartRef.current.height + delta / lanes.length,
+        );
+        onLaneRowHeightChange(next);
+      };
+
+      const onUp = (ev: PointerEvent) => {
+        handle.releasePointerCapture(ev.pointerId);
+        window.removeEventListener("pointermove", onMove);
+        window.removeEventListener("pointerup", onUp);
+      };
+
+      window.addEventListener("pointermove", onMove);
+      window.addEventListener("pointerup", onUp);
+    },
+    [laneRowHeight, lanes.length, onLaneRowHeightChange],
+  );
+
+  const timelineAreaHeight =
+    computeTimelineLaneAreaHeight(lanes.length, laneRowHeight) +
+    LANE_RESIZE_HANDLE_HEIGHT;
+  const laneHeightStyle = {
+    ["--lane-row-height" as string]: `${laneRowHeight}px`,
+  } as React.CSSProperties;
 
   const loadedTracks = useMemo(
-    () => tracks.filter((track) => loadedTrackIds.includes(track.id)),
+    () => filterLoadedTracks(tracks, loadedTrackIds),
     [tracks, loadedTrackIds],
   );
 
@@ -105,10 +177,32 @@ export function ArrangementSection({
   );
 
   const timelineWidthPx = computeTimelineWidthPx(arrangementDuration);
-  const canPlay = arrangementDuration > 0 && !isPlaying;
+  const canTransport = arrangementDuration > 0;
+  const canStop = canTransport && (isPlaying || playheadTime > 0);
 
   const selectedLane =
     lanes.find((lane) => lane.id === selectedLaneId) ?? null;
+
+  const editingLane =
+    laneDialog?.mode === "edit"
+      ? (lanes.find((lane) => lane.id === laneDialog.laneId) ?? null)
+      : null;
+
+  const defaultLaneName = `Lane ${lanes.length + 1}`;
+
+  const openAddLaneDialog = () => setLaneDialog({ mode: "add" });
+
+  const openEditLaneDialog = (laneId: string) => {
+    setSelectedLaneId(laneId);
+    setLaneDialog({ mode: "edit", laneId });
+  };
+
+  const closeLaneDialog = () => setLaneDialog(null);
+
+  const handleAddLane = (draft: LaneDraft) => {
+    onAddLane(draft);
+    closeLaneDialog();
+  };
 
   useEffect(() => {
     if (lanes.length === 0) {
@@ -129,14 +223,55 @@ export function ArrangementSection({
   };
 
   return (
-    <section className="arrangement-section">
+    <section className="arrangement-section" onPointerDown={onFocusTransport}>
+      {laneDialog && (
+        <ArrangementLaneDialog
+          mode={laneDialog.mode}
+          lane={editingLane ?? undefined}
+          defaultName={defaultLaneName}
+          onClose={closeLaneDialog}
+          onAdd={laneDialog.mode === "add" ? handleAddLane : undefined}
+          onRename={(name) => {
+            if (laneDialog.mode !== "edit") return;
+            onRenameLane(laneDialog.laneId, name);
+          }}
+          onSetMode={(mode) => {
+            if (laneDialog.mode !== "edit") return;
+            onSetLaneMode(laneDialog.laneId, mode);
+          }}
+          onSetMute={(mute) => {
+            if (laneDialog.mode !== "edit") return;
+            onSetMute(laneDialog.laneId, mute);
+          }}
+          onSetVolume={(volume) => {
+            if (laneDialog.mode !== "edit") return;
+            onSetVolume(laneDialog.laneId, volume);
+          }}
+          onRemove={
+            laneDialog.mode === "edit"
+              ? () => {
+                  onRemoveLane(laneDialog.laneId);
+                  if (selectedLaneId === laneDialog.laneId) {
+                    setSelectedLaneId(null);
+                  }
+                }
+              : undefined
+          }
+        />
+      )}
+
       <div className="arrangement-header">
         <h2>ARRANGEMENT</h2>
         <div className="arrangement-transport">
-          <button type="button" onClick={onPlay} disabled={!canPlay}>
-            PLAY
+          <button
+            type="button"
+            className={isPlaying ? "active" : undefined}
+            onClick={onTogglePlay}
+            disabled={!canTransport}
+          >
+            {isPlaying ? "PAUSE" : "PLAY"}
           </button>
-          <button type="button" onClick={onStop} disabled={!isPlaying}>
+          <button type="button" onClick={onStop} disabled={!canStop}>
             STOP
           </button>
           <button
@@ -153,30 +288,31 @@ export function ArrangementSection({
             {formatDuration(playheadTime)}
           </span>
         </div>
-        <button type="button" onClick={onAddLane}>
-          ADD LANE
-        </button>
       </div>
 
-      {lanes.length === 0 ? (
-        <p className="hint">
-          add a lane, then place chops from the bank below
-        </p>
-      ) : (
-        <div className="arrangement-editor">
-          <ArrangementLanePanel
-            lanes={lanes}
-            tracks={loadedTracks}
-            selectedLaneId={selectedLaneId}
-            onSelectLane={setSelectedLaneId}
-            onRenameLane={onRenameLane}
-            onSetMode={onSetLaneMode}
-            onSetMute={onSetMute}
-            onSetVolume={onSetVolume}
-            onRemoveLane={onRemoveLane}
-          />
+      <div
+        className={[
+          "arrangement-editor",
+          transportFocused ? "transport-focused" : "",
+        ]
+          .filter(Boolean)
+          .join(" ")}
+        style={laneHeightStyle}
+      >
+        <ArrangementLanePanel
+          lanes={lanes}
+          tracks={loadedTracks}
+          selectedLaneId={selectedLaneId}
+          onSelectLane={setSelectedLaneId}
+          onEditLane={openEditLaneDialog}
+          onAddLane={openAddLaneDialog}
+        />
 
-          <div className="arrangement-timeline-area">
+        {lanes.length > 0 ? (
+          <div
+            className="arrangement-timeline-area"
+            style={{ minHeight: `${timelineAreaHeight}px` }}
+          >
             <div className="arrangement-timeline-layout">
               <div className="arrangement-lane-labels">
                 <div className="arrangement-ruler-spacer" aria-hidden />
@@ -186,7 +322,8 @@ export function ArrangementSection({
                     type="button"
                     className={`arrangement-lane-label${lane.id === selectedLaneId ? " selected" : ""}`}
                     onClick={() => setSelectedLaneId(lane.id)}
-                    title={lane.name}
+                    onDoubleClick={() => openEditLaneDialog(lane.id)}
+                    title={`${lane.name} — double-click to edit`}
                   >
                     {lane.name || `Lane ${index + 1}`}
                   </button>
@@ -226,9 +363,20 @@ export function ArrangementSection({
                 </div>
               </div>
             </div>
+            <div
+              className="arrangement-lane-resize-handle"
+              role="separator"
+              aria-orientation="horizontal"
+              aria-label="Resize lane height"
+              onPointerDown={handleLaneResizePointerDown}
+            />
           </div>
-        </div>
-      )}
+        ) : (
+          <p className="hint arrangement-editor-empty">
+            add a lane, then place chops from the bank below
+          </p>
+        )}
+      </div>
 
       <ArrangementChopBank
         chopOptions={chopOptions}

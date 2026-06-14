@@ -14,6 +14,12 @@ import type {
   Track,
 } from "./types";
 import { createTrackId } from "./trackIds";
+import { deriveDefaultTrackName } from "./trackNames";
+import { DEFAULT_ACCENT_COLOR } from "./transport";
+import {
+  clampLaneRowHeight,
+  DEFAULT_LANE_ROW_HEIGHT,
+} from "./arrangement";
 
 const META_KEY = "mpc-session";
 const DB_NAME = "mpc";
@@ -36,29 +42,41 @@ type RawSessionMeta = Partial<SessionState | SavedSessionMetaV1 | SavedSessionMe
   version?: number;
   chops?: Partial<Chop>[];
   tracks?: Partial<Track>[];
-  arrangement?: { lanes?: Partial<ArrangementLane>[] };
+  arrangement?: {
+    lanes?: Partial<ArrangementLane>[];
+    laneRowHeight?: number;
+  };
+  activeTrackId?: string | null;
+  accentColor?: string;
 };
 
-export function normalizeSavedChops(
+function normalizeSavedChops(
   chops: Partial<Chop>[],
   paletteMode: PaletteMode,
 ): Chop[] {
-  return chops.map((chop, index) => ({
-    id: chop.id ?? `chop-${index}`,
-    start: chop.start ?? 0,
-    end: chop.end ?? 0,
-    key: chop.key ?? null,
-    color: chop.color ?? getColorForIndex(paletteMode, index),
-    volume: typeof chop.volume === "number" ? chop.volume : 1,
-    timeStretch:
-      typeof chop.timeStretch === "number"
-        ? normalizeTimeStretch(chop.timeStretch)
-        : 1,
-  }));
+  return chops.map((chop, index) => {
+    const name =
+      typeof chop.name === "string" && chop.name.trim()
+        ? chop.name.trim()
+        : undefined;
+    return {
+      id: chop.id ?? `chop-${index}`,
+      start: chop.start ?? 0,
+      end: chop.end ?? 0,
+      key: chop.key ?? null,
+      ...(name ? { name } : {}),
+      color: chop.color ?? getColorForIndex(paletteMode, index),
+      volume: typeof chop.volume === "number" ? chop.volume : 1,
+      timeStretch:
+        typeof chop.timeStretch === "number"
+          ? normalizeTimeStretch(chop.timeStretch)
+          : 1,
+    };
+  });
 }
 
 function emptyArrangement(): SessionState["arrangement"] {
-  return { lanes: [] };
+  return { lanes: [], laneRowHeight: DEFAULT_LANE_ROW_HEIGHT };
 }
 
 function migrateV2ToV3(v2: SavedSessionMetaV2): SessionState {
@@ -66,6 +84,7 @@ function migrateV2ToV3(v2: SavedSessionMetaV2): SessionState {
     ...v2,
     version: 3,
     arrangement: emptyArrangement(),
+    accentColor: DEFAULT_ACCENT_COLOR,
   };
 }
 
@@ -76,6 +95,14 @@ function migrateV1ToV2(v1: SavedSessionMetaV1): SavedSessionMetaV2 {
     tracks: [
       {
         id: trackId,
+        name: deriveDefaultTrackName(
+          {
+            sourceType: v1.sourceType,
+            sourceName: v1.sourceName,
+            name: "",
+          },
+          0,
+        ),
         sourceType: v1.sourceType,
         sourceName: v1.sourceName,
         sourceUrl: v1.sourceUrl,
@@ -119,19 +146,46 @@ function normalizeArrangementLanes(
   }));
 }
 
-function parseV1(parsed: RawSessionMeta): SavedSessionMetaV1 | null {
-  if (parsed.version !== 1) return null;
-  if (!parsed.sourceType || !parsed.sourceName || !Array.isArray(parsed.chops)) {
-    return null;
-  }
-
-  const paletteMode = parsed.paletteMode === "acidic" ? "acidic" : "pastel";
+function parseCommonSessionFields(parsed: RawSessionMeta): {
+  paletteMode: PaletteMode;
+  padMode: PadMode;
+  volume: number;
+  accentColor: string;
+} {
+  const paletteMode: PaletteMode =
+    parsed.paletteMode === "acidic" ? "acidic" : "pastel";
   const padMode: PadMode =
     parsed.padMode === "clear" ||
     parsed.padMode === "loop" ||
     parsed.padMode === "layer"
       ? parsed.padMode
       : "layer";
+  const volume = typeof parsed.volume === "number" ? parsed.volume : 1;
+  const accentColor =
+    typeof parsed.accentColor === "string" &&
+    /^#[0-9a-fA-F]{6}$/.test(parsed.accentColor)
+      ? parsed.accentColor
+      : DEFAULT_ACCENT_COLOR;
+  return { paletteMode, padMode, volume, accentColor };
+}
+
+function resolveActiveTrackId(
+  parsed: RawSessionMeta,
+  tracks: Track[],
+): string | null {
+  return typeof parsed.activeTrackId === "string" &&
+    tracks.some((t) => t.id === parsed.activeTrackId)
+    ? parsed.activeTrackId
+    : (tracks[0]?.id ?? null);
+}
+
+function parseV1(parsed: RawSessionMeta): SavedSessionMetaV1 | null {
+  if (parsed.version !== 1) return null;
+  if (!parsed.sourceType || !parsed.sourceName || !Array.isArray(parsed.chops)) {
+    return null;
+  }
+
+  const { paletteMode, padMode, volume } = parseCommonSessionFields(parsed);
 
   return {
     version: 1,
@@ -140,7 +194,7 @@ function parseV1(parsed: RawSessionMeta): SavedSessionMetaV1 | null {
     sourceUrl: parsed.sourceUrl,
     paletteMode,
     padMode,
-    volume: typeof parsed.volume === "number" ? parsed.volume : 1,
+    volume,
     chops: normalizeSavedChops(parsed.chops, paletteMode),
   };
 }
@@ -152,6 +206,17 @@ function parseTracks(
   if (!Array.isArray(parsed.tracks)) return null;
   return parsed.tracks.map((track, index) => ({
     id: track.id ?? `track-${index}`,
+    name: deriveDefaultTrackName(
+      {
+        sourceType:
+          track.sourceType === "youtube" || track.sourceType === "file"
+            ? track.sourceType
+            : "file",
+        sourceName: track.sourceName ?? "unknown",
+        name: track.name ?? "",
+      },
+      index,
+    ),
     sourceType:
       track.sourceType === "youtube" || track.sourceType === "file"
         ? track.sourceType
@@ -165,63 +230,46 @@ function parseTracks(
 function parseV2(parsed: RawSessionMeta): SavedSessionMetaV2 | null {
   if (parsed.version !== 2) return null;
 
-  const paletteMode = parsed.paletteMode === "acidic" ? "acidic" : "pastel";
-  const padMode: PadMode =
-    parsed.padMode === "clear" ||
-    parsed.padMode === "loop" ||
-    parsed.padMode === "layer"
-      ? parsed.padMode
-      : "layer";
+  const { paletteMode, padMode, volume } = parseCommonSessionFields(parsed);
 
   const tracks = parseTracks(parsed, paletteMode);
   if (!tracks) return null;
 
-  const activeTrackId =
-    typeof parsed.activeTrackId === "string" &&
-    tracks.some((t) => t.id === parsed.activeTrackId)
-      ? parsed.activeTrackId
-      : (tracks[0]?.id ?? null);
-
   return {
     version: 2,
     tracks,
-    activeTrackId,
+    activeTrackId: resolveActiveTrackId(parsed, tracks),
     paletteMode,
     padMode,
-    volume: typeof parsed.volume === "number" ? parsed.volume : 1,
+    volume,
   };
 }
 
 function parseV3(parsed: RawSessionMeta): SessionState | null {
   if (parsed.version !== 3) return null;
 
-  const paletteMode = parsed.paletteMode === "acidic" ? "acidic" : "pastel";
-  const padMode: PadMode =
-    parsed.padMode === "clear" ||
-    parsed.padMode === "loop" ||
-    parsed.padMode === "layer"
-      ? parsed.padMode
-      : "layer";
+  const { paletteMode, padMode, volume, accentColor } =
+    parseCommonSessionFields(parsed);
 
   const tracks = parseTracks(parsed, paletteMode);
   if (!tracks) return null;
-
-  const activeTrackId =
-    typeof parsed.activeTrackId === "string" &&
-    tracks.some((t) => t.id === parsed.activeTrackId)
-      ? parsed.activeTrackId
-      : (tracks[0]?.id ?? null);
 
   return {
     version: 3,
     tracks,
     arrangement: {
       lanes: normalizeArrangementLanes(parsed.arrangement?.lanes),
+      laneRowHeight: clampLaneRowHeight(
+        typeof parsed.arrangement?.laneRowHeight === "number"
+          ? parsed.arrangement.laneRowHeight
+          : DEFAULT_LANE_ROW_HEIGHT,
+      ),
     },
-    activeTrackId,
+    activeTrackId: resolveActiveTrackId(parsed, tracks),
     paletteMode,
     padMode,
-    volume: typeof parsed.volume === "number" ? parsed.volume : 1,
+    volume,
+    accentColor,
   };
 }
 
@@ -274,7 +322,7 @@ export async function saveTrackAudio(
   });
 }
 
-export async function loadTrackAudio(trackId: string): Promise<Blob | null> {
+export async function loadTrackBlob(trackId: string): Promise<Blob | null> {
   const db = await openDb();
   return new Promise((resolve, reject) => {
     const tx = db.transaction(AUDIO_STORE, "readonly");
@@ -300,7 +348,7 @@ export async function loadTrackAudio(trackId: string): Promise<Blob | null> {
 }
 
 export async function loadLegacyAudioBlob(): Promise<Blob | null> {
-  return loadTrackAudio(LEGACY_AUDIO_KEY);
+  return loadTrackBlob(LEGACY_AUDIO_KEY);
 }
 
 export async function migrateLegacyBlobToTrack(

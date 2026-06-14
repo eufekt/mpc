@@ -1,3 +1,4 @@
+import type { useMidiInput } from "../hooks/useMidiInput";
 import {
   bindingKeyFromBinding,
   bindingKeyFromEntry,
@@ -5,37 +6,16 @@ import {
   formatMidiEntry,
   isLearnableEntry,
   PAD_LETTERS,
-  type MidiBinding,
-  type MidiInputInfo,
-  type MidiLogEntry,
   type MidiPortInfo,
 } from "../lib/midi";
 
+type MidiApi = ReturnType<typeof useMidiInput>;
+
 type Props = {
-  supported: boolean;
-  connected: boolean;
-  error: string | null;
-  inputs: MidiInputInfo[];
-  outputs: MidiPortInfo[];
-  sysexEnabled: boolean;
-  permissionState: string | null;
-  messages: MidiLogEntry[];
-  bindings: MidiBinding[];
-  learnPad: string | null;
-  lastTrigger: string | null;
+  midi: MidiApi;
   assignedKeys: Set<string>;
   playMode: boolean;
   hasSelectedChop: boolean;
-  onConnect: () => void;
-  onConnectSysex: () => void;
-  onRescan: () => void;
-  onDisconnect: () => void;
-  onArmLearn: (padKey: string) => void;
-  onCancelLearn: () => void;
-  onClearLog: () => void;
-  onRemoveBinding: (key: string) => void;
-  onClearBindings: () => void;
-  onMapEntryToPad: (entry: MidiLogEntry, padKey: string) => void;
 };
 
 function PortList({
@@ -62,31 +42,34 @@ function PortList({
 }
 
 export function MidiDebugPanel({
-  supported,
-  connected,
-  error,
-  inputs,
-  outputs,
-  sysexEnabled,
-  permissionState,
-  messages,
-  bindings,
-  learnPad,
-  lastTrigger,
+  midi,
   assignedKeys,
   playMode,
   hasSelectedChop,
-  onConnect,
-  onConnectSysex,
-  onRescan,
-  onDisconnect,
-  onArmLearn,
-  onCancelLearn,
-  onClearLog,
-  onRemoveBinding,
-  onClearBindings,
-  onMapEntryToPad,
 }: Props) {
+  const {
+    supported,
+    connected,
+    error,
+    inputs,
+    outputs,
+    sysexEnabled,
+    permissionState,
+    messages,
+    bindings,
+    learnPad,
+    lastTrigger,
+    connect,
+    rescan,
+    disconnect,
+    armLearn,
+    cancelLearn,
+    clearLog,
+    removeBinding,
+    clearBindings,
+    mapEntryToPad,
+  } = midi;
+
   const bindingByPad = new Map(
     bindings.map((b) => [b.padKey.toUpperCase(), b]),
   );
@@ -101,12 +84,12 @@ export function MidiDebugPanel({
         <div className="midi-panel-actions">
           {!connected ? (
             <>
-              <button type="button" onClick={onConnect} disabled={!supported}>
+              <button type="button" onClick={() => void connect()} disabled={!supported}>
                 CONNECT
               </button>
               <button
                 type="button"
-                onClick={onConnectSysex}
+                onClick={() => void connect({ sysex: true })}
                 disabled={!supported}
               >
                 CONNECT (EXTENDED)
@@ -114,24 +97,24 @@ export function MidiDebugPanel({
             </>
           ) : (
             <>
-              <button type="button" onClick={onRescan}>
+              <button type="button" onClick={rescan}>
                 RESCAN
               </button>
-              <button type="button" onClick={onDisconnect}>
+              <button type="button" onClick={disconnect}>
                 DISCONNECT
               </button>
             </>
           )}
           <button
             type="button"
-            onClick={onClearLog}
+            onClick={clearLog}
             disabled={messages.length === 0}
           >
             CLEAR LOG
           </button>
           <button
             type="button"
-            onClick={onClearBindings}
+            onClick={clearBindings}
             disabled={bindings.length === 0}
           >
             CLEAR MAPS
@@ -211,7 +194,7 @@ export function MidiDebugPanel({
           <span className="midi-learn-status">
             press a key or button on your MIDI controller (not the computer
             keyboard) for pad {learnPad}…{" "}
-            <button type="button" onClick={onCancelLearn}>
+            <button type="button" onClick={cancelLearn}>
               cancel
             </button>
           </span>
@@ -247,7 +230,7 @@ export function MidiDebugPanel({
                       ? "chop assigned"
                       : "click to learn MIDI"
                 }
-                onClick={() => onArmLearn(pad)}
+                onClick={() => armLearn(pad)}
               >
                 {pad}
               </button>
@@ -289,7 +272,7 @@ export function MidiDebugPanel({
                     <button
                       type="button"
                       onClick={() =>
-                        onRemoveBinding(bindingKeyFromBinding(binding))
+                        removeBinding(bindingKeyFromBinding(binding))
                       }
                     >
                       ×
@@ -316,7 +299,9 @@ export function MidiDebugPanel({
                 <li key={entry.id} className="midi-log-entry">
                   <code>{formatMidiEntry(entry)}</code>
                   {mappedPad && (
-                    <span className="midi-log-mapped">→ {mappedPad}</span>
+                    <span className="midi-log-mapped">
+                      → {mappedPad}
+                    </span>
                   )}
                   {isLearnableEntry(entry) && !mappedPad && (
                     <span className="midi-log-map-actions">
@@ -325,7 +310,7 @@ export function MidiDebugPanel({
                         defaultValue=""
                         onChange={(e) => {
                           const pad = e.target.value;
-                          if (pad) onMapEntryToPad(entry, pad);
+                          if (pad) mapEntryToPad(entry, pad);
                           e.target.value = "";
                         }}
                       >

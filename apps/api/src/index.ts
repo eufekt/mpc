@@ -11,10 +11,17 @@ const PORT = 3001;
 app.use(cors());
 app.use(express.json());
 
-function runYtdlp(args: string[]): Promise<{ code: number; stderr: string }> {
+function runYtdlp(
+  args: string[],
+): Promise<{ code: number; stdout: string; stderr: string }> {
   return new Promise((resolve, reject) => {
+    let stdout = "";
     let stderr = "";
     const proc = spawn("yt-dlp", args);
+
+    proc.stdout.on("data", (chunk: Buffer) => {
+      stdout += chunk.toString();
+    });
 
     proc.stderr.on("data", (chunk: Buffer) => {
       stderr += chunk.toString();
@@ -25,7 +32,7 @@ function runYtdlp(args: string[]): Promise<{ code: number; stderr: string }> {
     });
 
     proc.on("close", (code) => {
-      resolve({ code: code ?? 1, stderr });
+      resolve({ code: code ?? 1, stdout, stderr });
     });
   });
 }
@@ -82,6 +89,41 @@ app.post("/api/youtube/audio", async (req, res) => {
     }
   } finally {
     await rm(dir, { recursive: true, force: true });
+  }
+});
+
+app.post("/api/youtube/metadata", async (req, res) => {
+  const url = req.body?.url;
+  if (!url || typeof url !== "string") {
+    res.status(400).send("url required");
+    return;
+  }
+
+  try {
+    const { code, stdout, stderr } = await runYtdlp([
+      "--print",
+      "title",
+      "--skip-download",
+      "--no-playlist",
+      url,
+    ]);
+
+    const title = stdout.trim();
+    if (code !== 0 || !title) {
+      res.status(500).send(stderr.trim() || `yt-dlp exited with code ${code}`);
+      return;
+    }
+
+    res.json({ title });
+  } catch (err) {
+    const error = err as NodeJS.ErrnoException;
+    res
+      .status(500)
+      .send(
+        error.code === "ENOENT"
+          ? "yt-dlp not found — run: brew install yt-dlp && brew install ffmpeg"
+          : error.message ?? "metadata fetch failed",
+      );
   }
 });
 

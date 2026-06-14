@@ -3,7 +3,7 @@ import {
   clearSession,
   loadLegacyAudioBlob,
   loadSessionState,
-  loadTrackAudio,
+  loadTrackBlob,
   migrateLegacyBlobToTrack,
   saveSessionState,
   saveTrackAudio,
@@ -86,7 +86,7 @@ export function useSessionPersistence({
         for (const track of saved.tracks) {
           if (abort.signal.aborted || suppressRestoreRef.current) return;
 
-          let blob = await loadTrackAudio(track.id);
+          let blob = await loadTrackBlob(track.id);
 
           if (!blob && migratedFromV1 && track.id === saved.tracks[0]?.id) {
             blob = legacyBlob;
@@ -152,7 +152,7 @@ export function useSessionPersistence({
     // eslint-disable-next-line react-hooks/exhaustive-deps -- restore once on mount
   }, []);
 
-  const structuralSessionKey = useMemo(
+  const sessionSaveKey = useMemo(
     () =>
       JSON.stringify({
         version: session.version,
@@ -161,6 +161,8 @@ export function useSessionPersistence({
         paletteMode: session.paletteMode,
         padMode: session.padMode,
         volume: session.volume,
+        accentColor: session.accentColor,
+        activeTrackId: session.activeTrackId,
       }),
     [
       session.version,
@@ -169,6 +171,8 @@ export function useSessionPersistence({
       session.paletteMode,
       session.padMode,
       session.volume,
+      session.accentColor,
+      session.activeTrackId,
     ],
   );
 
@@ -187,20 +191,13 @@ export function useSessionPersistence({
     }
 
     if (!session.tracks.some((t) => engine.hasTrack(t.id))) return;
-    saveSessionState(session);
-  }, [structuralSessionKey, engine.loadedTrackIds, session]);
-
-  useEffect(() => {
-    if (isRestoringRef.current) return;
-    if (session.tracks.length === 0) return;
-    if (!session.tracks.some((t) => engine.hasTrack(t.id))) return;
 
     const timer = window.setTimeout(() => {
       saveSessionState(sessionRef.current);
     }, 300);
 
     return () => window.clearTimeout(timer);
-  }, [session.activeTrackId, session.volume, engine.loadedTrackIds]);
+  }, [sessionSaveKey, engine.loadedTrackIds]);
 
   const persistTrackAudio = async (trackId: string, blob: Blob) => {
     await saveTrackAudio(trackId, blob);

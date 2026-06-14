@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { stopSource } from "../lib/audioUtils";
 import {
   computeArrangementDuration,
   getClipStartTime,
@@ -14,14 +15,6 @@ const LOOKAHEAD_SECONDS = 0.05;
 const LOOP_ITERATIONS_AHEAD = 3;
 /** Re-schedule more loop passes when playhead is within this many seconds of the end. */
 const LOOP_RESCHEDULE_LEAD_SECONDS = 8;
-
-function stopSource(source: AudioBufferSourceNode) {
-  try {
-    source.stop();
-  } catch {
-    // already stopped
-  }
-}
 
 function iterationTimelineOffset(
   iterIndex: number,
@@ -349,6 +342,37 @@ export function useArrangementPlayer({
     bump();
   }, [bump, clearEndTimer, stopLoopMaintainer, stopSources]);
 
+  const pause = useCallback(() => {
+    if (!isPlaying) return;
+
+    clearEndTimer();
+    stopLoopMaintainer();
+    stopSources();
+
+    const ctx = getContext();
+    const baseTime = baseTimeRef.current;
+    if (baseTime !== null) {
+      const elapsed = ctx.currentTime - baseTime;
+      const duration = durationRef.current;
+      const pausedAt = loopRef.current
+        ? loopPlayheadTime(elapsed, duration, loopInitialStartRef.current)
+        : loopInitialStartRef.current + elapsed;
+      setSeekTimeState(Math.min(pausedAt, duration));
+    }
+
+    baseTimeRef.current = null;
+    nextLoopIterationRef.current = 0;
+    setIsPlaying(false);
+    bump();
+  }, [
+    bump,
+    clearEndTimer,
+    getContext,
+    isPlaying,
+    stopLoopMaintainer,
+    stopSources,
+  ]);
+
   const schedulePlaybackEnd = useCallback(
     (segmentDuration: number) => {
       clearEndTimer();
@@ -384,13 +408,12 @@ export function useArrangementPlayer({
       const duration = computeArrangementDuration(lanes, tracks);
       if (duration <= 0) return;
 
-      const startAt = Math.max(
+      let startAt = Math.max(
         0,
         Math.min(fromTime ?? seekTime, duration),
       );
       if (startAt >= duration) {
-        setSeekTimeState(duration);
-        return;
+        startAt = 0;
       }
 
       const baseTime = ctx.currentTime + LOOKAHEAD_SECONDS;
@@ -471,7 +494,13 @@ export function useArrangementPlayer({
     return loopInitialStartRef.current + elapsed;
   }, [getContext, isPlaying, seekTime]);
 
-  const getDuration = useCallback(() => durationRef.current, []);
+  const toggle = useCallback(async () => {
+    if (isPlaying) {
+      pause();
+      return;
+    }
+    await play();
+  }, [isPlaying, pause, play]);
 
   return {
     isPlaying,
@@ -479,10 +508,11 @@ export function useArrangementPlayer({
     loop,
     version,
     play,
+    pause,
+    toggle,
     stop,
     setSeekTime,
     setLoop,
     getPlayheadTime,
-    getDuration,
   };
 }

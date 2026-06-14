@@ -1,17 +1,14 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { ArrangementSection } from "./components/ArrangementSection";
+import {
+  ArrangementSection,
+  type ArrangementActions,
+} from "./components/ArrangementSection";
 import { FileUpload } from "./components/FileUpload";
 import { PadRow } from "./components/PadRow";
 import { TrackList } from "./components/TrackList";
 import { TrackModal } from "./components/TrackModal";
 import { TrackPanel } from "./components/TrackPanel";
-import { TracksSection } from "./components/TracksSection";
 import { UrlInput } from "./components/UrlInput";
-import {
-  ConfigMenuBody,
-  ConfigMenuTrigger,
-  useConfigMenu,
-} from "./components/ConfigMenu";
 import { MidiDebugPanel } from "./components/MidiDebugPanel";
 import { SettingsPanel } from "./components/SettingsPanel";
 import { useArrangementPlayer } from "./hooks/useArrangementPlayer";
@@ -23,28 +20,40 @@ import {
 } from "./hooks/useSamplerKeyboard";
 import { useSessionPersistence } from "./hooks/useSessionPersistence";
 import { createTrack, createArrangementLane, useSessionState } from "./hooks/useSessionState";
-import { normalizeTimeStretch } from "./lib/chopPlayback";
+import { filterLoadedTracks } from "./lib/arrangement";
+import type { PaletteMode } from "./lib/chopColors";
+import { isTypingTarget } from "./lib/keyboard";
+import {
+  fetchYouTubeTitle,
+  nameFromFileName,
+} from "./lib/trackNames";
 import {
   getAssignedKeys,
   getChopsForKey,
   getKeyColors,
+  resolvePadPress,
   toChopPlayRequests,
 } from "./lib/pads";
 import { deleteTrackAudio } from "./lib/sessionPersistence";
-import type { PaletteMode } from "./lib/chopColors";
+import type { TransportFocus } from "./lib/transport";
 
 export default function App() {
   const engine = useAudioEngine();
   const {
     session,
+    activeTrack,
     addTrack,
     removeTrack,
+    renameTrack,
     setActiveTrack,
     updateChops,
+    deleteChop,
+    updateChop,
     bindKey,
     setPaletteMode,
     setPadMode,
     setVolume,
+    setAccentColor,
     restoreSession,
     resetSession,
     addLane,
@@ -59,6 +68,7 @@ export default function App() {
     setClipStackMode,
     setLaneMute,
     setLaneVolume,
+    setLaneRowHeight,
   } = useSessionState();
 
   const [selectedChop, setSelectedChop] = useState<SelectedChop | null>(null);
@@ -67,7 +77,16 @@ export default function App() {
   const [playMode, setPlayMode] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
   const [playheadTime, setPlayheadTime] = useState(0);
-  const configMenu = useConfigMenu();
+  const [transportFocus, setTransportFocus] = useState<TransportFocus>({
+    type: "arrangement",
+  });
+  const [viewVisibility, setViewVisibility] = useState({
+    tracks: true,
+    arrangement: true,
+    pads: true,
+  });
+  const [midiPanelOpen, setMidiPanelOpen] = useState(false);
+  const [settingsPanelOpen, setSettingsPanelOpen] = useState(false);
   const activeTrackId = session.activeTrackId;
   const arrangementPlayer = useArrangementPlayer({
     lanes: session.arrangement.lanes,
@@ -103,56 +122,116 @@ export default function App() {
     arrangementPlayer.stop();
   }, [arrangementPlayer]);
 
+  const pauseArrangement = useCallback(() => {
+    arrangementPlayer.pause();
+  }, [arrangementPlayer]);
+
   const playArrangement = useCallback(async () => {
     engine.stopAllPlayback();
     engine.stopLoop();
     await arrangementPlayer.play();
   }, [arrangementPlayer, engine]);
 
+  const toggleArrangementPlayback = useCallback(async () => {
+    if (arrangementPlayer.isPlaying) {
+      arrangementPlayer.pause();
+      return;
+    }
+    await playArrangement();
+  }, [arrangementPlayer, playArrangement]);
+
   const hasAudio = engine.loadedTrackIds.length > 0;
+
+  const loadedTracks = useMemo(
+    () => filterLoadedTracks(session.tracks, engine.loadedTrackIds),
+    [session.tracks, engine.loadedTrackIds],
+  );
+
+  useEffect(() => {
+    if (loadedTracks.length === 0) return;
+    setTransportFocus((prev) => {
+      if (
+        prev.type === "track" &&
+        loadedTracks.some((track) => track.id === prev.trackId)
+      ) {
+        return prev;
+      }
+      const trackId =
+        activeTrackId && loadedTracks.some((track) => track.id === activeTrackId)
+          ? activeTrackId
+          : loadedTracks[0].id;
+      return { type: "track", trackId };
+    });
+  }, [loadedTracks, activeTrackId]);
+
+  const focusTrackTransport = useCallback((trackId: string) => {
+    setTransportFocus({ type: "track", trackId });
+  }, []);
+
+  const focusArrangementTransport = useCallback(() => {
+    setTransportFocus({ type: "arrangement" });
+  }, []);
+
+  const handleSpaceTransport = useCallback(async () => {
+    if (!hasAudio) return;
+
+    if (arrangementPlayer.isPlaying) {
+      pauseArrangement();
+      return;
+    }
+
+    const playingTrackId = engine.getPlayingTrackId();
+    if (playingTrackId) {
+      engine.pauseTrack(playingTrackId);
+      return;
+    }
+
+    if (engine.loopingKey) {
+      engine.stopLoop();
+      return;
+    }
+
+    if (transportFocus.type === "arrangement") {
+      await toggleArrangementPlayback();
+      return;
+    }
+
+    if (engine.hasTrack(transportFocus.trackId)) {
+      stopArrangement();
+      engine.stopLoop();
+      await engine.resume();
+      await engine.toggleTrackPlayback(transportFocus.trackId);
+    }
+  }, [
+    arrangementPlayer.isPlaying,
+    engine,
+    hasAudio,
+    pauseArrangement,
+    stopArrangement,
+    toggleArrangementPlayback,
+    transportFocus,
+  ]);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.code !== "Space") return;
-      const target = event.target;
-      if (
-        target instanceof HTMLInputElement ||
-        target instanceof HTMLTextAreaElement ||
-        target instanceof HTMLSelectElement
-      ) {
-        return;
-      }
+      if (isTypingTarget(event.target)) return;
       if (!hasAudio) return;
       event.preventDefault();
-      if (arrangementPlayer.isPlaying) {
-        stopArrangement();
-      } else {
-        void playArrangement();
-      }
+      void handleSpaceTransport();
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [
-    arrangementPlayer.isPlaying,
-    hasAudio,
-    playArrangement,
-    stopArrangement,
-  ]);
-
-  const loadedTracks = useMemo(
-    () =>
-      session.tracks.filter((t) => engine.loadedTrackIds.includes(t.id)),
-    [session.tracks, engine.loadedTrackIds],
-  );
+  }, [handleSpaceTransport, hasAudio]);
 
   const { persistTrackAudio, cancelPendingRestore, clearPersistedSession } =
     useSessionPersistence({
-    engine,
-    session,
-    restoreSession,
-    setVolume,
-    onStatus: setStatus,
-  });
+      engine,
+      session,
+      restoreSession,
+      setVolume,
+      onStatus: setStatus,
+    });
 
   const assignedKeys = useMemo(
     () => getAssignedKeys(session.tracks),
@@ -168,6 +247,10 @@ export default function App() {
     setPaletteMode(mode);
   };
 
+  const toggleView = (view: keyof typeof viewVisibility) => {
+    setViewVisibility((prev) => ({ ...prev, [view]: !prev[view] }));
+  };
+
   const handlePadModeChange = (mode: typeof session.padMode) => {
     if (session.padMode === "loop" && mode !== "loop") {
       engine.stopLoop();
@@ -178,8 +261,7 @@ export default function App() {
   const playKey = useCallback(
     (key: string) => {
       stopArrangement();
-      const bound = getChopsForKey(session.tracks, key);
-      const requests = toChopPlayRequests(bound);
+      const requests = toChopPlayRequests(getChopsForKey(session.tracks, key));
       if (requests.length === 0) return;
       void engine.playChops(requests, session.padMode);
     },
@@ -196,35 +278,34 @@ export default function App() {
       if (!selectedChop || selectedChop.trackId !== trackId) return;
       bindKey(trackId, selectedChop.chopId, key);
       setSelectedChop(null);
-      setStatus(`chop bound to ${key.toUpperCase()}`);
+      setStatus(`chop bound to ${key}`);
     },
     [selectedChop, bindKey],
   );
 
-  const handleMidiPad = useCallback(
-    (padKey: string) => {
+  const handlePadInteraction = useCallback(
+    (key: string, requirePlayMode: boolean) => {
       void engine.resume();
-      const key = padKey.toLowerCase();
+      const action = resolvePadPress({
+        tracks: session.tracks,
+        selectedChop,
+        key,
+        requirePlayMode,
+        playMode,
+        hasAudio,
+      });
 
-      if (selectedChop) {
-        const track = session.tracks.find((t) => t.id === selectedChop.trackId);
-        const chop = track?.chops.find((c) => c.id === selectedChop.chopId);
-        if (chop?.key?.toUpperCase() === padKey) {
-          flashPad(padKey);
-          playKey(key);
-          setSelectedChop(null);
-          return;
-        }
+      if (action === "noop") return;
+
+      if (action === "bind") {
+        if (!selectedChop) return;
         handleBindKey(selectedChop.trackId, key);
         return;
       }
 
-      if (!playMode || !hasAudio) return;
-
-      if (getChopsForKey(session.tracks, key).length > 0) {
-        flashPad(padKey);
-        playKey(key);
-      }
+      flashPad(key.toUpperCase());
+      playKey(key);
+      if (selectedChop) setSelectedChop(null);
     },
     [
       engine,
@@ -236,6 +317,13 @@ export default function App() {
       playKey,
       handleBindKey,
     ],
+  );
+
+  const handleMidiPad = useCallback(
+    (padKey: string) => {
+      handlePadInteraction(padKey, true);
+    },
+    [handlePadInteraction],
   );
 
   const midi = useMidiInput({ onPadTrigger: handleMidiPad });
@@ -265,12 +353,11 @@ export default function App() {
     try {
       await engine.resume();
       const result = await load(track.id);
-      const blob =
-        result instanceof File ? result : (result as Blob);
+      const blob = result instanceof File ? result : (result as Blob);
       await persistTrackAudio(track.id, blob);
       setActiveTrack(track.id);
       setLoadModalOpen(false);
-      setStatus(`loaded: ${track.sourceName}`);
+      setStatus(`loaded: ${track.name}`);
     } catch {
       removeTrack(track.id);
       engine.unloadTrack(track.id);
@@ -282,37 +369,38 @@ export default function App() {
     setStatus("loading...");
     await loadIntoNewTrack(
       (trackId) => engine.loadFile(trackId, file),
-      { sourceType: "file", sourceName: file.name },
+      {
+        sourceType: "file",
+        sourceName: file.name,
+        name: nameFromFileName(file.name),
+      },
     );
   };
 
   const handleLoadUrl = async (url: string) => {
     setStatus("loading...");
+    const name = await fetchYouTubeTitle(url).catch(() => "YouTube");
     await loadIntoNewTrack(
       (trackId) => engine.loadYouTubeUrl(trackId, url),
-      { sourceType: "youtube", sourceName: url, sourceUrl: url },
+      {
+        sourceType: "youtube",
+        sourceName: url,
+        sourceUrl: url,
+        name,
+      },
     );
   };
 
   const handlePadClick = (key: string) => {
-    if (selectedChop) {
-      const track = session.tracks.find((t) => t.id === selectedChop.trackId);
-      const chop = track?.chops.find((c) => c.id === selectedChop.chopId);
-      if (chop?.key?.toUpperCase() === key) {
-        flashPad(key);
-        playKey(key);
-        setSelectedChop(null);
-        return;
-      }
-      handleBindKey(selectedChop.trackId, key);
-      return;
-    }
-
-    if (getChopsForKey(session.tracks, key).length > 0) {
-      flashPad(key);
-      playKey(key);
-    }
+    handlePadInteraction(key, false);
   };
+
+  const handleRenameTrack = useCallback(
+    (trackId: string, name: string) => {
+      renameTrack(trackId, name);
+    },
+    [renameTrack],
+  );
 
   const handleRemoveTrack = (trackId: string) => {
     engine.unloadTrack(trackId);
@@ -343,59 +431,40 @@ export default function App() {
 
   const handleDeleteChop = useCallback(
     (trackId: string, chopId: string) => {
-      const track = session.tracks.find((t) => t.id === trackId);
-      if (!track) return;
-      updateChops(
-        trackId,
-        track.chops.filter((c) => c.id !== chopId),
-      );
+      deleteChop(trackId, chopId);
       setSelectedChop((prev) =>
         prev?.trackId === trackId && prev.chopId === chopId ? null : prev,
       );
     },
-    [session.tracks, updateChops],
+    [deleteChop],
   );
 
   const handleChopColorChange = useCallback(
     (trackId: string, chopId: string, color: string) => {
-      const track = session.tracks.find((t) => t.id === trackId);
-      if (!track) return;
-      updateChops(
-        trackId,
-        track.chops.map((c) => (c.id === chopId ? { ...c, color } : c)),
-      );
+      updateChop(trackId, chopId, { color });
     },
-    [session.tracks, updateChops],
+    [updateChop],
   );
 
   const handleChopVolumeChange = useCallback(
     (trackId: string, chopId: string, volume: number) => {
-      const track = session.tracks.find((t) => t.id === trackId);
-      if (!track) return;
-      const clamped = Math.max(0, Math.min(1, volume));
-      updateChops(
-        trackId,
-        track.chops.map((c) =>
-          c.id === chopId ? { ...c, volume: clamped } : c,
-        ),
-      );
+      updateChop(trackId, chopId, { volume });
     },
-    [session.tracks, updateChops],
+    [updateChop],
   );
 
   const handleChopTimeStretchChange = useCallback(
     (trackId: string, chopId: string, timeStretch: number) => {
-      const track = session.tracks.find((t) => t.id === trackId);
-      if (!track) return;
-      const normalized = normalizeTimeStretch(timeStretch);
-      updateChops(
-        trackId,
-        track.chops.map((c) =>
-          c.id === chopId ? { ...c, timeStretch: normalized } : c,
-        ),
-      );
+      updateChop(trackId, chopId, { timeStretch });
     },
-    [session.tracks, updateChops],
+    [updateChop],
+  );
+
+  const handleChopNameChange = useCallback(
+    (trackId: string, chopId: string, name: string) => {
+      updateChop(trackId, chopId, { name });
+    },
+    [updateChop],
   );
 
   const trackTransport = useMemo(
@@ -417,7 +486,34 @@ export default function App() {
     ],
   );
 
-  const activeTrack = session.tracks.find((t) => t.id === activeTrackId) ?? null;
+  const arrangementActions = useMemo<ArrangementActions>(
+    () => ({
+      onRemoveLane: removeLane,
+      onRenameLane: (laneId, name) => updateLaneMeta(laneId, { name }),
+      onSetMute: setLaneMute,
+      onSetVolume: setLaneVolume,
+      onSetLaneMode: setLaneMode,
+      onAddClip: addClip,
+      onAddClipAt: addClipAt,
+      onRemoveClip: removeClip,
+      onReorderClip: reorderClip,
+      onMoveClip: moveClip,
+      onSetClipStackMode: setClipStackMode,
+    }),
+    [
+      addClip,
+      addClipAt,
+      moveClip,
+      removeClip,
+      removeLane,
+      reorderClip,
+      setClipStackMode,
+      setLaneMode,
+      setLaneMute,
+      setLaneVolume,
+      updateLaneMeta,
+    ],
+  );
 
   const handleClearSavedData = useCallback(async () => {
     const confirmed = window.confirm(
@@ -431,7 +527,6 @@ export default function App() {
       engine.unloadTrack(trackId);
     }
     resetSession();
-    midi.clearBindings();
     await clearPersistedSession();
     setSelectedChop(null);
     setLoadModalOpen(false);
@@ -441,25 +536,80 @@ export default function App() {
     cancelPendingRestore,
     clearPersistedSession,
     engine,
-    midi,
     resetSession,
   ]);
 
   return (
-    <main>
+    <main style={{ ["--accent-color" as string]: session.accentColor }}>
       <header className="top-bar">
         <h1>MPC</h1>
         <button
           type="button"
+          className={loadModalOpen ? "active" : undefined}
+          onClick={() => setLoadModalOpen(true)}
+          title={
+            activeTrack?.name
+              ? `Load track — active: ${activeTrack.name}`
+              : "Load track"
+          }
+        >
+          {session.tracks.length > 0
+            ? `LOAD TRACK (${session.tracks.length})`
+            : "LOAD TRACK"}
+        </button>
+        <button
+          type="button"
           className={playMode ? "active" : undefined}
           onClick={() => setPlayMode((prev) => !prev)}
+          title="Toggle play mode — P"
         >
-          PLAY
+          PLAY MODE (P)
         </button>
-        <ConfigMenuTrigger
-          menuOpen={configMenu.menuOpen}
-          onToggle={configMenu.toggleMenu}
-        />
+        <div className="top-bar-views">
+          <span>views</span>
+          <button
+            type="button"
+            className={viewVisibility.tracks ? "active" : undefined}
+            onClick={() => toggleView("tracks")}
+            title="Show or hide timeline tracks"
+          >
+            TRACKS
+          </button>
+          <button
+            type="button"
+            className={viewVisibility.arrangement ? "active" : undefined}
+            onClick={() => toggleView("arrangement")}
+            title="Show or hide arrangement"
+          >
+            ARRANGEMENT
+          </button>
+          <button
+            type="button"
+            className={viewVisibility.pads ? "active" : undefined}
+            onClick={() => toggleView("pads")}
+            title="Show or hide pads"
+          >
+            PADS
+          </button>
+        </div>
+        <div className="top-bar-panels-toggle">
+          <button
+            type="button"
+            className={midiPanelOpen ? "active" : undefined}
+            onClick={() => setMidiPanelOpen((prev) => !prev)}
+            aria-expanded={midiPanelOpen}
+          >
+            MIDI
+          </button>
+          <button
+            type="button"
+            className={settingsPanelOpen ? "active" : undefined}
+            onClick={() => setSettingsPanelOpen((prev) => !prev)}
+            aria-expanded={settingsPanelOpen}
+          >
+            SETTINGS
+          </button>
+        </div>
         <div className="top-bar-volume">
           <label htmlFor="volume">VOLUME</label>
           <input
@@ -478,48 +628,27 @@ export default function App() {
         </div>
       </header>
 
-      <ConfigMenuBody
-        menuOpen={configMenu.menuOpen}
-        activeTab={configMenu.activeTab}
-        onSelectTab={configMenu.selectTab}
-        midiPanel={
-          <MidiDebugPanel
-            supported={midi.supported}
-            connected={midi.connected}
-            error={midi.error}
-            inputs={midi.inputs}
-            outputs={midi.outputs}
-            sysexEnabled={midi.sysexEnabled}
-            permissionState={midi.permissionState}
-            messages={midi.messages}
-            bindings={midi.bindings}
-            learnPad={midi.learnPad}
-            lastTrigger={midi.lastTrigger}
-            assignedKeys={assignedKeys}
-            playMode={playMode}
-            hasSelectedChop={selectedChop !== null}
-            onConnect={() => void midi.connect()}
-            onConnectSysex={() => void midi.connect({ sysex: true })}
-            onRescan={midi.rescan}
-            onDisconnect={midi.disconnect}
-            onArmLearn={midi.armLearn}
-            onCancelLearn={midi.cancelLearn}
-            onClearLog={midi.clearLog}
-            onRemoveBinding={midi.removeBinding}
-            onClearBindings={midi.clearBindings}
-            onMapEntryToPad={midi.mapEntryToPad}
-          />
-        }
-        settingsPanel={
-          <SettingsPanel onClearSavedData={handleClearSavedData} />
-        }
-      />
-
-      <TracksSection
-        trackCount={session.tracks.length}
-        activeTrackName={activeTrack?.sourceName ?? null}
-        onOpen={() => setLoadModalOpen(true)}
-      />
+      {(midiPanelOpen || settingsPanelOpen) && (
+        <div className="top-bar-panels">
+          {midiPanelOpen && (
+            <MidiDebugPanel
+              midi={midi}
+              assignedKeys={assignedKeys}
+              playMode={playMode}
+              hasSelectedChop={selectedChop !== null}
+            />
+          )}
+          {settingsPanelOpen && (
+            <SettingsPanel
+              accentColor={session.accentColor}
+              onAccentColorChange={setAccentColor}
+              paletteMode={session.paletteMode}
+              onPaletteModeChange={handlePaletteChange}
+              onClearSavedData={handleClearSavedData}
+            />
+          )}
+        </div>
+      )}
 
       {loadModalOpen && (
         <TrackModal title="LOAD TRACK" onClose={() => setLoadModalOpen(false)}>
@@ -548,97 +677,83 @@ export default function App() {
 
       {loadedTracks.length > 0 && (
         <>
-          <section className="palette-toggle">
-            <span>PALETTE</span>
-            <button
-              type="button"
-              className={
-                session.paletteMode === "pastel" ? "active" : undefined
-              }
-              onClick={() => handlePaletteChange("pastel")}
-            >
-              PASTEL
-            </button>
-            <button
-              type="button"
-              className={
-                session.paletteMode === "acidic" ? "active" : undefined
-              }
-              onClick={() => handlePaletteChange("acidic")}
-            >
-              ACIDIC
-            </button>
-          </section>
+          {viewVisibility.tracks && (
+            <div className="timeline-stack">
+              {loadedTracks.map((track) => {
+                const buffer = engine.getBuffer(track.id);
+                if (!buffer) return null;
+                const index = session.tracks.findIndex((t) => t.id === track.id);
+                return (
+                  <TrackPanel
+                    key={track.id}
+                    track={track}
+                    index={index}
+                    buffer={buffer}
+                    paletteMode={session.paletteMode}
+                    transport={trackTransport}
+                    transportVersion={engine.transportVersion}
+                    isActive={track.id === activeTrackId}
+                    selectedChopId={
+                      selectedChop?.trackId === track.id
+                        ? selectedChop.chopId
+                        : null
+                    }
+                    onActivateTrack={handleSelectTrack}
+                    updateChops={updateChops}
+                    onSelectChop={handleSelectChop}
+                    onDeleteChop={handleDeleteChop}
+                    onChopColorChange={handleChopColorChange}
+                    onChopNameChange={handleChopNameChange}
+                    onChopVolumeChange={handleChopVolumeChange}
+                    onChopTimeStretchChange={handleChopTimeStretchChange}
+                    onRemoveTrack={handleRemoveTrack}
+                    onRenameTrack={handleRenameTrack}
+                    transportFocused={
+                      transportFocus.type === "track" &&
+                      transportFocus.trackId === track.id
+                    }
+                    onFocusTransport={() => focusTrackTransport(track.id)}
+                  />
+                );
+              })}
+            </div>
+          )}
 
-          <div className="timeline-stack">
-            {loadedTracks.map((track) => {
-              const buffer = engine.getBuffer(track.id);
-              if (!buffer) return null;
-              const index = session.tracks.findIndex((t) => t.id === track.id);
-              return (
-                <TrackPanel
-                  key={track.id}
-                  track={track}
-                  index={index}
-                  buffer={buffer}
-                  paletteMode={session.paletteMode}
-                  transport={trackTransport}
-                  transportVersion={engine.transportVersion}
-                  isActive={track.id === activeTrackId}
-                  selectedChopId={
-                    selectedChop?.trackId === track.id
-                      ? selectedChop.chopId
-                      : null
-                  }
-                  onActivateTrack={handleSelectTrack}
-                  updateChops={updateChops}
-                  onSelectChop={handleSelectChop}
-                  onDeleteChop={handleDeleteChop}
-                  onChopColorChange={handleChopColorChange}
-                  onChopVolumeChange={handleChopVolumeChange}
-                  onChopTimeStretchChange={handleChopTimeStretchChange}
-                  onRemoveTrack={handleRemoveTrack}
-                />
-              );
-            })}
-          </div>
+          {viewVisibility.tracks && viewVisibility.arrangement && <hr />}
 
-          <hr />
-          <ArrangementSection
-            lanes={session.arrangement.lanes}
-            tracks={session.tracks}
-            loadedTrackIds={engine.loadedTrackIds}
-            isPlaying={arrangementPlayer.isPlaying}
-            playheadTime={playheadTime}
-            loop={arrangementPlayer.loop}
-            onPlay={() => void playArrangement()}
-            onStop={stopArrangement}
-            onSeek={arrangementPlayer.setSeekTime}
-            onLoopChange={arrangementPlayer.setLoop}
-            onAddLane={() => {
-              const laneNumber = session.arrangement.lanes.length + 1;
-              addLane(createArrangementLane(`Lane ${laneNumber}`));
-            }}
-            onRemoveLane={removeLane}
-            onRenameLane={(laneId, name) =>
-              updateLaneMeta(laneId, { name })
-            }
-            onSetMute={setLaneMute}
-            onSetVolume={setLaneVolume}
-            onSetLaneMode={setLaneMode}
-            onAddClip={addClip}
-            onAddClipAt={addClipAt}
-            onRemoveClip={removeClip}
-            onReorderClip={reorderClip}
-            onMoveClip={moveClip}
-            onSetClipStackMode={setClipStackMode}
-          />
+          {viewVisibility.arrangement && (
+            <ArrangementSection
+              lanes={session.arrangement.lanes}
+              tracks={session.tracks}
+              loadedTrackIds={engine.loadedTrackIds}
+              isPlaying={arrangementPlayer.isPlaying}
+              playheadTime={playheadTime}
+              loop={arrangementPlayer.loop}
+              transportFocused={transportFocus.type === "arrangement"}
+              onFocusTransport={focusArrangementTransport}
+              onTogglePlay={() => void toggleArrangementPlayback()}
+              onStop={stopArrangement}
+              onSeek={arrangementPlayer.setSeekTime}
+              onLoopChange={arrangementPlayer.setLoop}
+              onAddLane={(draft) => {
+                addLane({
+                  ...createArrangementLane(draft.name),
+                  mode: draft.mode,
+                  mute: draft.mute,
+                  volume: draft.volume,
+                });
+              }}
+              laneRowHeight={session.arrangement.laneRowHeight}
+              onLaneRowHeightChange={setLaneRowHeight}
+              actions={arrangementActions}
+            />
+          )}
         </>
       )}
 
-      {hasAudio && (
+      {hasAudio && viewVisibility.pads && (
         <>
-          <hr />
+          {(viewVisibility.tracks || viewVisibility.arrangement) && <hr />}
           <h2>PADS</h2>
           <section className="pad-mode-toggle">
             <span>MODE</span>
@@ -678,7 +793,6 @@ export default function App() {
           />
         </>
       )}
-
     </main>
   );
 }

@@ -1,14 +1,7 @@
 import { useCallback, useRef, useState } from "react";
+import { stopSource } from "../lib/audioUtils";
 import { playFrom, playSlice, playSliceLoop } from "../lib/sliceAudioBuffer";
 import type { ChopPlayRequest, PadMode } from "../lib/types";
-
-function stopSource(source: AudioBufferSourceNode) {
-  try {
-    source.stop();
-  } catch {
-    // already stopped
-  }
-}
 
 type ActivePlayback = {
   trackId: string;
@@ -45,7 +38,6 @@ export function useAudioEngine() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const volumeRef = useRef(1);
-  const [volume, setVolumeState] = useState(1);
   const padSourcesRef = useRef<Map<string, AudioBufferSourceNode>>(new Map());
   const loopRef = useRef<LoopState | null>(null);
   const activePlaybackRef = useRef<ActivePlayback | null>(null);
@@ -74,7 +66,6 @@ export function useAudioEngine() {
   const setVolume = useCallback((value: number) => {
     const clamped = Math.max(0, Math.min(1, value));
     volumeRef.current = clamped;
-    setVolumeState(clamped);
     if (gainNodeRef.current) {
       gainNodeRef.current.gain.value = clamped;
     }
@@ -206,6 +197,13 @@ export function useAudioEngine() {
     [getTransport],
   );
 
+  const getPlayingTrackId = useCallback((): string | null => {
+    for (const [trackId, transport] of transportRef.current) {
+      if (transport.isPlaying) return trackId;
+    }
+    return null;
+  }, []);
+
   const getPlaybackTime = useCallback((trackId: string): number | null => {
     const ctx = contextRef.current;
     if (!ctx) return null;
@@ -286,10 +284,6 @@ export function useAudioEngine() {
 
   const getBuffer = useCallback((trackId: string): AudioBuffer | null => {
     return buffersRef.current.get(trackId) ?? null;
-  }, []);
-
-  const getTrackName = useCallback((trackId: string): string | null => {
-    return trackNamesRef.current.get(trackId) ?? null;
   }, []);
 
   const loadFile = useCallback(
@@ -514,7 +508,6 @@ export function useAudioEngine() {
   return {
     loading,
     error,
-    volume,
     loadedTrackIds,
     transportVersion,
     loopingKey,
@@ -522,7 +515,6 @@ export function useAudioEngine() {
     unloadTrack,
     hasTrack,
     getBuffer,
-    getTrackName,
     loadFile,
     loadYouTubeUrl,
     playChops,
@@ -531,6 +523,7 @@ export function useAudioEngine() {
     stopLoop,
     stopAllPlayback,
     isTrackPlaying,
+    getPlayingTrackId,
     getSeekTime,
     setSeekTime,
     getPlaybackTime,

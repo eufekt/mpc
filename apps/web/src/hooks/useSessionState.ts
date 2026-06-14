@@ -7,8 +7,10 @@ import {
   migrateLaneToFree,
   resolveFreeClipStartTime,
   resolveLaneClips,
+  DEFAULT_LANE_ROW_HEIGHT,
+  clampLaneRowHeight,
 } from "../lib/arrangement";
-import { getChopPlaybackDuration, normalizeTimeStretch } from "../lib/chopPlayback";
+import { getChopNaturalDuration, getChopPlaybackDuration, normalizeTimeStretch } from "../lib/chopPlayback";
 import { assignColorsToChops, type PaletteMode } from "../lib/chopColors";
 import type {
   ArrangementLane,
@@ -20,11 +22,10 @@ import type {
   Track,
 } from "../lib/types";
 import { createTrackId } from "../lib/trackIds";
-
-export { createTrackId };
+import { DEFAULT_ACCENT_COLOR } from "../lib/transport";
 
 export function createTrack(
-  params: Pick<Track, "sourceType" | "sourceName"> & {
+  params: Pick<Track, "sourceType" | "sourceName" | "name"> & {
     sourceUrl?: string;
     chops?: Chop[];
     id?: string;
@@ -32,6 +33,7 @@ export function createTrack(
 ): Track {
   return {
     id: params.id ?? createTrackId(),
+    name: params.name,
     sourceType: params.sourceType,
     sourceName: params.sourceName,
     sourceUrl: params.sourceUrl,
@@ -57,11 +59,12 @@ function createInitialState(): SessionState {
   return {
     version: 3,
     tracks: [],
-    arrangement: { lanes: [] },
+    arrangement: { lanes: [], laneRowHeight: DEFAULT_LANE_ROW_HEIGHT },
     activeTrackId: null,
     paletteMode: "pastel",
     padMode: "layer",
     volume: 1,
+    accentColor: DEFAULT_ACCENT_COLOR,
   };
 }
 
@@ -70,12 +73,16 @@ type SessionAction =
   | { type: "reset" }
   | { type: "addTrack"; track: Track }
   | { type: "removeTrack"; trackId: string }
+  | { type: "renameTrack"; trackId: string; name: string }
   | { type: "setActiveTrack"; trackId: string | null }
   | { type: "updateChops"; trackId: string; chops: Chop[] }
+  | { type: "deleteChop"; trackId: string; chopId: string }
+  | { type: "updateChop"; trackId: string; chopId: string; patch: Partial<Chop> }
   | { type: "bindKey"; trackId: string; chopId: string; key: string }
   | { type: "setPaletteMode"; mode: PaletteMode }
   | { type: "setPadMode"; mode: PadMode }
   | { type: "setVolume"; volume: number }
+  | { type: "setAccentColor"; accentColor: string }
   | { type: "addLane"; lane: ArrangementLane }
   | { type: "removeLane"; laneId: string }
   | { type: "updateLane"; laneId: string; patch: Partial<ArrangementLane> }
@@ -105,7 +112,8 @@ type SessionAction =
       repeat?: number;
     }
   | { type: "setLaneMute"; laneId: string; mute: boolean }
-  | { type: "setLaneVolume"; laneId: string; volume: number };
+  | { type: "setLaneVolume"; laneId: string; volume: number }
+  | { type: "setLaneRowHeight"; laneRowHeight: number };
 
 function laneBlockerSegments(
   lane: ArrangementLane,
@@ -142,6 +150,7 @@ function updateLane(
   return {
     ...state,
     arrangement: {
+      ...state.arrangement,
       lanes: state.arrangement.lanes.map((lane) =>
         lane.id === laneId ? updater(lane) : lane,
       ),
@@ -175,6 +184,7 @@ function sessionReducer(
         tracks,
         activeTrackId,
         arrangement: {
+          ...state.arrangement,
           lanes: state.arrangement.lanes.map((lane) => ({
             ...lane,
             clips: lane.clips.filter(
@@ -184,6 +194,13 @@ function sessionReducer(
         },
       };
     }
+    case "renameTrack":
+      return {
+        ...state,
+        tracks: state.tracks.map((t) =>
+          t.id === action.trackId ? { ...t, name: action.name } : t,
+        ),
+      };
     case "setActiveTrack":
       return { ...state, activeTrackId: action.trackId };
     case "updateChops":
@@ -193,6 +210,7 @@ function sessionReducer(
           t.id === action.trackId ? { ...t, chops: action.chops } : t,
         ),
         arrangement: {
+          ...state.arrangement,
           lanes: state.arrangement.lanes.map((lane) => ({
             ...lane,
             clips: lane.clips.filter((clip) => {
@@ -201,6 +219,42 @@ function sessionReducer(
             }),
           })),
         },
+      };
+    case "deleteChop":
+      return {
+        ...state,
+        tracks: state.tracks.map((t) =>
+          t.id !== action.trackId
+            ? t
+            : { ...t, chops: t.chops.filter((c) => c.id !== action.chopId) },
+        ),
+        arrangement: {
+          ...state.arrangement,
+          lanes: state.arrangement.lanes.map((lane) => ({
+            ...lane,
+            clips: lane.clips.filter(
+              (clip) =>
+                !(
+                  clip.sourceTrackId === action.trackId &&
+                  clip.chopId === action.chopId
+                ),
+            ),
+          })),
+        },
+      };
+    case "updateChop":
+      return {
+        ...state,
+        tracks: state.tracks.map((t) =>
+          t.id !== action.trackId
+            ? t
+            : {
+                ...t,
+                chops: t.chops.map((c) =>
+                  c.id === action.chopId ? { ...c, ...action.patch } : c,
+                ),
+              },
+        ),
       };
     case "bindKey": {
       const lower = action.key.toLowerCase();
@@ -232,10 +286,13 @@ function sessionReducer(
       return { ...state, padMode: action.mode };
     case "setVolume":
       return { ...state, volume: action.volume };
+    case "setAccentColor":
+      return { ...state, accentColor: action.accentColor };
     case "addLane":
       return {
         ...state,
         arrangement: {
+          ...state.arrangement,
           lanes: [...state.arrangement.lanes, action.lane],
         },
       };
@@ -243,6 +300,7 @@ function sessionReducer(
       return {
         ...state,
         arrangement: {
+          ...state.arrangement,
           lanes: state.arrangement.lanes.filter(
             (lane) => lane.id !== action.laneId,
           ),
@@ -271,7 +329,7 @@ function sessionReducer(
       const repeat = Math.max(1, Math.floor(action.repeat ?? 1));
       const match = findChop(state.tracks, action.sourceTrackId, action.chopId);
       if (!match) return state;
-      const naturalDuration = Math.max(0, match.chop.end - match.chop.start);
+      const naturalDuration = getChopNaturalDuration(match.chop);
       const playbackDuration = getChopPlaybackDuration(
         naturalDuration,
         normalizeTimeStretch(match.chop.timeStretch),
@@ -386,6 +444,14 @@ function sessionReducer(
         ...lane,
         volume: action.volume,
       }));
+    case "setLaneRowHeight":
+      return {
+        ...state,
+        arrangement: {
+          ...state.arrangement,
+          laneRowHeight: clampLaneRowHeight(action.laneRowHeight),
+        },
+      };
     default:
       return state;
   }
@@ -411,6 +477,10 @@ export function useSessionState() {
     dispatch({ type: "removeTrack", trackId });
   }, []);
 
+  const renameTrack = useCallback((trackId: string, name: string) => {
+    dispatch({ type: "renameTrack", trackId, name });
+  }, []);
+
   const setActiveTrack = useCallback((trackId: string | null) => {
     dispatch({ type: "setActiveTrack", trackId });
   }, []);
@@ -418,6 +488,28 @@ export function useSessionState() {
   const updateChops = useCallback((trackId: string, chops: Chop[]) => {
     dispatch({ type: "updateChops", trackId, chops });
   }, []);
+
+  const deleteChop = useCallback((trackId: string, chopId: string) => {
+    dispatch({ type: "deleteChop", trackId, chopId });
+  }, []);
+
+  const updateChop = useCallback(
+    (trackId: string, chopId: string, patch: Partial<Chop>) => {
+      const normalized = { ...patch };
+      if (typeof normalized.volume === "number") {
+        normalized.volume = Math.max(0, Math.min(1, normalized.volume));
+      }
+      if (typeof normalized.timeStretch === "number") {
+        normalized.timeStretch = normalizeTimeStretch(normalized.timeStretch);
+      }
+      if (typeof normalized.name === "string") {
+        const trimmed = normalized.name.trim();
+        normalized.name = trimmed || undefined;
+      }
+      dispatch({ type: "updateChop", trackId, chopId, patch: normalized });
+    },
+    [],
+  );
 
   const bindKey = useCallback(
     (trackId: string, chopId: string, key: string) => {
@@ -436,6 +528,10 @@ export function useSessionState() {
 
   const setVolume = useCallback((volume: number) => {
     dispatch({ type: "setVolume", volume });
+  }, []);
+
+  const setAccentColor = useCallback((accentColor: string) => {
+    dispatch({ type: "setAccentColor", accentColor });
   }, []);
 
   const addLane = useCallback((lane?: ArrangementLane) => {
@@ -537,6 +633,10 @@ export function useSessionState() {
     dispatch({ type: "setLaneVolume", laneId, volume });
   }, []);
 
+  const setLaneRowHeight = useCallback((laneRowHeight: number) => {
+    dispatch({ type: "setLaneRowHeight", laneRowHeight });
+  }, []);
+
   const activeTrack =
     session.tracks.find((t) => t.id === session.activeTrackId) ?? null;
 
@@ -547,12 +647,16 @@ export function useSessionState() {
     resetSession,
     addTrack,
     removeTrack,
+    renameTrack,
     setActiveTrack,
     updateChops,
+    deleteChop,
+    updateChop,
     bindKey,
     setPaletteMode,
     setPadMode,
     setVolume,
+    setAccentColor,
     addLane,
     removeLane,
     updateLaneMeta,
@@ -565,5 +669,6 @@ export function useSessionState() {
     setClipStackMode,
     setLaneMute,
     setLaneVolume,
+    setLaneRowHeight,
   };
 }

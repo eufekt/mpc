@@ -6,16 +6,16 @@ import type {
   Track,
 } from "./types";
 import {
+  getChopNaturalDuration,
   getChopPlaybackDuration,
   normalizeTimeStretch,
 } from "./chopPlayback";
+import { formatDuration } from "./timeFormat";
 
 export {
   formatTimeStretch,
-  getChopPlaybackDuration,
   MAX_TIME_STRETCH_PERCENT,
   MIN_TIME_STRETCH_PERCENT,
-  normalizeTimeStretch,
   percentToTimeStretch,
   timeStretchToPercent,
 } from "./chopPlayback";
@@ -52,6 +52,26 @@ export const ARRANGEMENT_TIMELINE_PAD_SECONDS = 30;
 /** Minimum timeline length when lanes exist (even with no clips). */
 export const ARRANGEMENT_TIMELINE_MIN_SECONDS = 60;
 
+export const DEFAULT_LANE_ROW_HEIGHT = 28;
+export const MIN_LANE_ROW_HEIGHT = 20;
+export const MAX_LANE_ROW_HEIGHT = 160;
+export const ARRANGEMENT_RULER_HEIGHT = 20;
+
+export function clampLaneRowHeight(height: number): number {
+  if (!Number.isFinite(height)) return DEFAULT_LANE_ROW_HEIGHT;
+  return Math.round(
+    Math.max(MIN_LANE_ROW_HEIGHT, Math.min(MAX_LANE_ROW_HEIGHT, height)),
+  );
+}
+
+export function computeTimelineLaneAreaHeight(
+  laneCount: number,
+  laneRowHeight: number,
+): number {
+  if (laneCount <= 0) return 0;
+  return ARRANGEMENT_RULER_HEIGHT + laneCount * clampLaneRowHeight(laneRowHeight);
+}
+
 export function clipWidthPx(duration: number): number {
   return Math.max(0, duration) * ARRANGEMENT_PX_PER_SECOND;
 }
@@ -71,6 +91,22 @@ export function pxDeltaToTime(px: number): number {
 
 export function playheadLeftPx(playheadTime: number): number {
   return timeToPx(Math.max(0, playheadTime));
+}
+
+export function filterLoadedTracks(
+  tracks: Track[],
+  loadedTrackIds: string[],
+): Track[] {
+  return tracks.filter((track) => loadedTrackIds.includes(track.id));
+}
+
+export function seekTimeFromClientX(
+  clientX: number,
+  element: HTMLElement,
+  pxToTimeFn: (px: number) => number = pxToTime,
+): number {
+  const rect = element.getBoundingClientRect();
+  return pxToTimeFn(clientX - rect.left);
 }
 
 export function getClipStartTime(
@@ -287,6 +323,17 @@ export function formatChopKey(chop: Chop): string {
   return chop.key ? chop.key.toUpperCase() : "—";
 }
 
+/** Chop table # column label — custom name or 1-based index. */
+export function formatChopDisplayName(chop: Chop, chopIndex: number): string {
+  const name = chop.name?.trim();
+  return name || String(chopIndex + 1);
+}
+
+export function formatChopSummary(option: ChopOption, extra?: string): string {
+  const base = `${formatChopDisplayName(option.chop, option.chopIndex)} · ${formatDuration(option.duration)} · ${formatChopKey(option.chop)}`;
+  return extra ? `${base} · ${extra}` : base;
+}
+
 export function getChopOptionId(option: ChopOption): string {
   return `${option.sourceTrackId}:${option.chopId}`;
 }
@@ -317,11 +364,11 @@ export function getAllChops(tracks: Track[]): ChopOption[] {
     track.chops.forEach((chop, chopIndex) => {
       options.push({
         sourceTrackId: track.id,
-        sourceTrackName: track.sourceName,
+        sourceTrackName: track.name,
         chopId: chop.id,
         chopIndex,
         chop,
-        duration: Math.max(0, chop.end - chop.start),
+        duration: getChopNaturalDuration(chop),
       });
     });
   }
@@ -336,7 +383,7 @@ export function resolveLaneClips(
   for (const clip of lane.clips) {
     const match = findChop(tracks, clip.sourceTrackId, clip.chopId);
     if (!match) continue;
-    const duration = Math.max(0, match.chop.end - match.chop.start);
+    const duration = getChopNaturalDuration(match.chop);
     const timeStretch = normalizeTimeStretch(match.chop.timeStretch);
     resolved.push({
       clip,

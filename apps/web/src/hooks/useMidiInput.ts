@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   bindingFromEntry,
-  bindingKey,
   bindingKeyFromBinding,
   entryMatchesBinding,
   isLearnableEntry,
@@ -299,11 +298,6 @@ export function useMidiInput({ onPadTrigger }: Options = {}) {
     };
   }, [disconnect]);
 
-  const bindingLookup = useCallback(
-    (key: string) => bindings.find((b) => bindingKeyFromBinding(b) === key),
-    [bindings],
-  );
-
   return {
     supported,
     connected,
@@ -312,7 +306,6 @@ export function useMidiInput({ onPadTrigger }: Options = {}) {
     outputs,
     sysexEnabled,
     permissionState,
-    devices: inputs.map((i) => i.name),
     messages,
     bindings,
     learnPad,
@@ -326,7 +319,5 @@ export function useMidiInput({ onPadTrigger }: Options = {}) {
     removeBinding,
     clearBindings,
     mapEntryToPad,
-    bindingLookup,
-    bindingKey,
   };
 }

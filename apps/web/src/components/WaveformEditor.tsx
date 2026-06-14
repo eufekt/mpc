@@ -69,7 +69,6 @@ function createPlaybackCursor(): HTMLDivElement {
     top: "0",
     height: "100%",
     pointerEvents: "none",
-    borderLeft: "1px solid #000",
     opacity: "0",
   });
   return line;

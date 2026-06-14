@@ -28,6 +28,7 @@ type Props = {
   onSelectChop: (trackId: string, chopId: string | null) => void;
   onDeleteChop: (trackId: string, chopId: string) => void;
   onChopColorChange: (trackId: string, chopId: string, color: string) => void;
+  onChopNameChange: (trackId: string, chopId: string, name: string) => void;
   onChopVolumeChange: (trackId: string, chopId: string, volume: number) => void;
   onChopTimeStretchChange: (
     trackId: string,
@@ -35,6 +36,9 @@ type Props = {
     timeStretch: number,
   ) => void;
   onRemoveTrack: (trackId: string) => void;
+  onRenameTrack: (trackId: string, name: string) => void;
+  transportFocused: boolean;
+  onFocusTransport: () => void;
 };
 
 export const TrackPanel = memo(function TrackPanel({
@@ -51,9 +55,13 @@ export const TrackPanel = memo(function TrackPanel({
   onSelectChop,
   onDeleteChop,
   onChopColorChange,
+  onChopNameChange,
   onChopVolumeChange,
   onChopTimeStretchChange,
   onRemoveTrack,
+  onRenameTrack,
+  transportFocused,
+  onFocusTransport,
 }: Props) {
   void transportVersion;
   const seekTime = transport.getSeekTime(track.id);
@@ -91,6 +99,13 @@ export const TrackPanel = memo(function TrackPanel({
     [onDeleteChop, track.id],
   );
 
+  const handleTableNameChange = useCallback(
+    (chopId: string, name: string) => {
+      onChopNameChange(track.id, chopId, name);
+    },
+    [onChopNameChange, track.id],
+  );
+
   const handleTableVolumeChange = useCallback(
     (chopId: string, volume: number) => {
       onChopVolumeChange(track.id, chopId, volume);
@@ -114,13 +129,29 @@ export const TrackPanel = memo(function TrackPanel({
 
   return (
     <section
-      className={["track-panel", isActive ? "active" : ""].filter(Boolean).join(" ")}
+      className={[
+        "track-panel",
+        isActive ? "active" : "",
+        transportFocused ? "transport-focused" : "",
+      ]
+        .filter(Boolean)
+        .join(" ")}
       onClick={onSelectTrack}
+      onPointerDown={onFocusTransport}
     >
       <header className="track-panel-header">
-        <span className="track-panel-title">
-          {index + 1}. {track.sourceName}
-        </span>
+        <label className="track-panel-name-field">
+          <span className="track-panel-index">{index + 1}.</span>
+          <input
+            className="track-panel-name"
+            type="text"
+            value={track.name}
+            onChange={(e) => onRenameTrack(track.id, e.target.value)}
+            onClick={(e) => e.stopPropagation()}
+            onPointerDown={(e) => e.stopPropagation()}
+            aria-label={`Track ${index + 1} name`}
+          />
+        </label>
         <div className="track-panel-transport">
           <button
             type="button"
@@ -168,6 +199,7 @@ export const TrackPanel = memo(function TrackPanel({
           selectedId={isActive ? selectedChopId : null}
           onSelect={handleSelectChop}
           onDelete={handleDeleteChop}
+          onNameChange={handleTableNameChange}
           onVolumeChange={handleTableVolumeChange}
           onTimeStretchChange={handleTableTimeStretchChange}
           onColorChange={handleTableColorChange}

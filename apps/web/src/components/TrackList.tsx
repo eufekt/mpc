@@ -32,7 +32,7 @@ export function TrackList({
               disabled={!loaded}
               title={loaded ? "select track" : "still loading"}
             >
-              {index + 1}. {track.sourceName || "untitled"}
+              {index + 1}. {track.name || "untitled"}
               {!loaded ? " (pending)" : ""}
             </button>
             <button
