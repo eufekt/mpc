@@ -1,6 +1,13 @@
 import { useEffect, useState } from "react";
 import { PALETTES, type PaletteMode } from "../lib/chopColors";
+import {
+  MAX_TIME_STRETCH_PERCENT,
+  MIN_TIME_STRETCH_PERCENT,
+  percentToTimeStretch,
+  timeStretchToPercent,
+} from "../lib/arrangement";
 import type { Chop } from "../lib/types";
+import { formatTimePrecise } from "../lib/timeFormat";
 
 type Props = {
   chops: Chop[];
@@ -9,6 +16,7 @@ type Props = {
   onSelect: (id: string) => void;
   onDelete: (id: string) => void;
   onVolumeChange: (id: string, volume: number) => void;
+  onTimeStretchChange: (id: string, timeStretch: number) => void;
   onColorChange: (id: string, color: string) => void;
 };
 
@@ -19,6 +27,7 @@ export function ChopTable({
   onSelect,
   onDelete,
   onVolumeChange,
+  onTimeStretchChange,
   onColorChange,
 }: Props) {
   const [openColorId, setOpenColorId] = useState<string | null>(null);
@@ -50,6 +59,7 @@ export function ChopTable({
           <th>end</th>
           <th>key</th>
           <th>vol</th>
+          <th>spd</th>
           <th></th>
         </tr>
       </thead>
@@ -107,10 +117,10 @@ export function ChopTable({
               )}
             </td>
             <td>{index + 1}</td>
-            <td>{chop.start.toFixed(2)}</td>
-            <td>{chop.end.toFixed(2)}</td>
+            <td>{formatTimePrecise(chop.start)}</td>
+            <td>{formatTimePrecise(chop.end)}</td>
             <td>{chop.key?.toUpperCase() ?? "—"}</td>
-            <td>
+            <td className="chop-volume-cell">
               <input
                 type="range"
                 className="chop-volume"
@@ -127,6 +137,25 @@ export function ChopTable({
               <span className="chop-volume-value">
                 {Math.round(chop.volume * 100)}
               </span>
+            </td>
+            <td>
+              <input
+                type="number"
+                className="chop-stretch"
+                min={MIN_TIME_STRETCH_PERCENT}
+                max={MAX_TIME_STRETCH_PERCENT}
+                step={1}
+                value={timeStretchToPercent(chop.timeStretch)}
+                aria-label={`chop ${index + 1} speed`}
+                onClick={(e) => e.stopPropagation()}
+                onChange={(e) => {
+                  e.stopPropagation();
+                  const next = Number.parseInt(e.target.value, 10);
+                  if (Number.isFinite(next)) {
+                    onTimeStretchChange(chop.id, percentToTimeStretch(next));
+                  }
+                }}
+              />
             </td>
             <td className="chop-delete-cell">
               <button

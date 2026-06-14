@@ -66,32 +66,34 @@ input[type="text"] {
   max-width: 100%;
 }
 
-.app-header {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  margin: -16px -16px 0;
-  padding: 0 16px;
-}
-
-.app-header h1 {
-  line-height: 1.2;
-}
-
-.play-mode-bar {
+.top-bar {
   position: sticky;
   top: 0;
   z-index: 10;
+  display: flex;
   flex-direction: row;
   align-items: center;
   gap: 8px;
   background: #fff;
   border-bottom: 1px solid #000;
-  margin: 0 -16px;
+  margin: -16px -16px 0;
   padding: 4px 16px;
 }
 
-.volume,
+.top-bar h1 {
+  margin: 0;
+  line-height: 1.2;
+}
+
+.top-bar-volume {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 4px;
+  margin-left: auto;
+  font-size: 12px;
+}
+
 .palette-toggle,
 .pad-mode-toggle,
 .transport {
@@ -162,21 +164,102 @@ tr.selected .chop-color-swatch {
 }
 
 input[type="range"] {
-  width: 160px;
-  accent-color: #000;
+  --volume-track: #000;
+  --volume-thumb: #000;
+  -webkit-appearance: none;
+  appearance: none;
+  width: 48px;
+  height: 8px;
+  margin: 0;
+  padding: 0;
+  background: transparent;
+  cursor: pointer;
+  vertical-align: middle;
+}
+
+input[type="range"]::-webkit-slider-runnable-track {
+  height: 1px;
+  background: var(--volume-track);
+}
+
+input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 5px;
+  height: 5px;
+  margin-top: -2px;
+  border: none;
+  border-radius: 0;
+  background: var(--volume-thumb);
+}
+
+input[type="range"]::-moz-range-track {
+  height: 1px;
+  background: var(--volume-track);
+  border: none;
+}
+
+input[type="range"]::-moz-range-thumb {
+  width: 5px;
+  height: 5px;
+  border: none;
+  border-radius: 0;
+  background: var(--volume-thumb);
+}
+
+input[type="range"]:focus-visible {
+  outline: 1px solid #000;
+  outline-offset: 2px;
+}
+
+tr.selected input[type="range"] {
+  --volume-track: #fff;
+  --volume-thumb: #fff;
+}
+
+tr.selected input[type="range"]:focus-visible {
+  outline-color: #fff;
+}
+
+.chop-volume-cell {
+  padding: 2px 4px;
+  white-space: nowrap;
 }
 
 .chop-volume {
-  width: 72px;
-  vertical-align: middle;
+  width: 40px;
 }
 
 .chop-volume-value {
   display: inline-block;
   min-width: 2ch;
-  margin-left: 4px;
-  font-size: 12px;
+  margin-left: 2px;
+  font-size: 10px;
+  line-height: 1;
   vertical-align: middle;
+  opacity: 0.7;
+}
+
+.top-bar-volume input[type="range"] {
+  width: 56px;
+}
+
+.arrangement-lane-volume input[type="range"] {
+  width: 44px;
+}
+
+.top-bar-volume span {
+  min-width: 2ch;
+  font-size: 10px;
+  opacity: 0.7;
+}
+
+.chop-stretch {
+  font-family: inherit;
+  font-size: 12px;
+  border: 1px solid #000;
+  padding: 2px 4px;
+  min-width: 4ch;
+  width: 52px;
 }
 
 .chop-delete-cell {
@@ -408,4 +491,643 @@ pre {
   display: flex;
   align-items: center;
   gap: 8px;
+}
+
+.config-menu-body {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  margin: 0 -16px;
+  border-top: 1px solid #000;
+}
+
+.config-menu-tabs {
+  display: flex;
+  flex-direction: row;
+  border-bottom: 1px solid #000;
+}
+
+.config-menu-tabs button {
+  border: none;
+  border-right: 1px solid #000;
+  border-radius: 0;
+  padding: 6px 16px;
+}
+
+.config-menu-tabs button:last-child {
+  border-right: none;
+}
+
+.config-menu-body > .midi-panel,
+.config-menu-body > .settings-panel {
+  margin: 0;
+  border: none;
+  border-bottom: 1px solid #000;
+  padding: 16px;
+}
+
+.midi-panel {
+  border: 1px solid #000;
+  padding: 8px;
+  gap: 8px;
+}
+
+.settings-panel {
+  border: 1px solid #000;
+  padding: 8px;
+  gap: 8px;
+}
+
+.settings-panel-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.settings-panel-header h2 {
+  margin: 0;
+}
+
+.midi-panel-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.midi-panel-header h2 {
+  margin: 0;
+}
+
+.midi-panel-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.midi-troubleshoot ol {
+  margin: 0;
+  padding-left: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.midi-troubleshoot a {
+  color: inherit;
+}
+
+.midi-port-label {
+  font-size: 12px;
+  text-transform: uppercase;
+}
+
+.midi-warning {
+  font-weight: bold;
+}
+
+.midi-input-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 12px;
+}
+
+.midi-learn {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.midi-learn-status {
+  font-style: italic;
+}
+
+.midi-pad-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.midi-pad.mapped {
+  border-width: 2px;
+}
+
+.midi-bindings-table {
+  width: 100%;
+}
+
+.midi-log-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 200px;
+  overflow-y: auto;
+  border: 1px solid #000;
+  padding: 4px;
+}
+
+.midi-log-entry {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.midi-log-entry code {
+  font-family: inherit;
+  font-size: 12px;
+}
+
+.midi-log-mapped {
+  font-weight: bold;
+}
+
+.midi-log-map-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+}
+
+.midi-log-map-actions select {
+  font-family: inherit;
+  font-size: inherit;
+  border: 1px solid #000;
+  background: #fff;
+}
+
+.arrangement-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.arrangement-editor {
+  display: flex;
+  gap: 0;
+  border: 1px solid #000;
+  background: #fff;
+}
+
+.arrangement-lane-panel {
+  flex-shrink: 0;
+  width: 180px;
+  border-right: 1px solid #000;
+  display: flex;
+  flex-direction: column;
+}
+
+.arrangement-lane-panel-header {
+  padding: 4px 8px;
+  font-size: 11px;
+  font-weight: bold;
+  border-bottom: 1px solid #000;
+  background: #f5f5f5;
+}
+
+.arrangement-lane-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.arrangement-lane-list-item {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  width: 100%;
+  padding: 6px 8px;
+  border: none;
+  border-bottom: 1px solid #ddd;
+  background: #fff;
+  font-family: inherit;
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.arrangement-lane-list-item.selected {
+  background: #000;
+  color: #fff;
+}
+
+.arrangement-lane-list-name {
+  font-weight: bold;
+  text-transform: uppercase;
+}
+
+.arrangement-lane-list-meta {
+  font-size: 10px;
+  opacity: 0.8;
+}
+
+.arrangement-lane-list-duration {
+  font-size: 10px;
+}
+
+.arrangement-lane-controls {
+  margin-top: auto;
+  padding: 8px;
+  border-top: 1px solid #000;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  font-size: 12px;
+}
+
+.arrangement-lane-control {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.arrangement-timeline-area {
+  flex: 1;
+  min-width: 0;
+}
+
+.arrangement-timeline-layout {
+  display: flex;
+}
+
+.arrangement-lane-labels {
+  flex-shrink: 0;
+  width: 72px;
+  border-right: 1px solid #000;
+  background: #f5f5f5;
+}
+
+.arrangement-ruler-spacer {
+  height: 20px;
+  border-bottom: 1px solid #000;
+}
+
+.arrangement-lane-label {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  height: 28px;
+  padding: 0 6px;
+  border: none;
+  border-bottom: 1px solid #ddd;
+  background: transparent;
+  font-family: inherit;
+  font-size: 10px;
+  font-weight: bold;
+  text-transform: uppercase;
+  text-align: left;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.arrangement-lane-label.selected {
+  background: #e8e8e8;
+}
+
+.arrangement-lane-strips {
+  display: flex;
+  flex-direction: column;
+}
+
+.arrangement-lane-strip-row {
+  height: 28px;
+  border-bottom: 1px solid #ddd;
+}
+
+.arrangement-lane-strip-row.selected {
+  background: rgba(0, 0, 0, 0.03);
+}
+
+.arrangement-chop-bank {
+  border: 1px solid #000;
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  background: #fff;
+}
+
+.arrangement-chop-bank-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px;
+  font-size: 11px;
+  font-weight: bold;
+}
+
+.arrangement-chop-bank-target {
+  font-weight: normal;
+  font-size: 11px;
+  color: #666;
+}
+
+.arrangement-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.arrangement-header h2 {
+  margin-right: auto;
+}
+
+.arrangement-transport {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.arrangement-transport button.active {
+  font-weight: bold;
+  background: #000;
+  color: #fff;
+}
+
+.arrangement-duration,
+.arrangement-playhead-time,
+.arrangement-lane-duration {
+  font-size: 12px;
+}
+
+.arrangement-timeline-scroll {
+  flex: 1;
+  overflow-x: auto;
+  min-width: 0;
+}
+
+.arrangement-timeline-ruler {
+  position: relative;
+  height: 20px;
+  border-bottom: 1px solid #000;
+  background: #f5f5f5;
+  cursor: pointer;
+}
+
+.arrangement-clip-strip.seekable {
+  cursor: pointer;
+}
+
+.arrangement-ruler-tick {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  border-left: 1px solid #ccc;
+  pointer-events: none;
+}
+
+.arrangement-ruler-label {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  font-size: 9px;
+  white-space: nowrap;
+  color: #333;
+}
+
+.arrangement-lane-mode {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+}
+
+.arrangement-lane-mode button {
+  font-size: 11px;
+  padding: 2px 6px;
+}
+
+.arrangement-lane-mode button.active {
+  font-weight: bold;
+  background: #000;
+  color: #fff;
+}
+
+.arrangement-placement-hint {
+  margin: 0;
+  font-size: 11px;
+  color: #666;
+}
+
+.arrangement-lane-name {
+  font-family: inherit;
+  font-size: inherit;
+  border: 1px solid #000;
+  padding: 2px 4px;
+  width: 100%;
+  text-transform: uppercase;
+}
+
+.arrangement-lane-volume {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  font-size: 11px;
+}
+
+.arrangement-clip-strip {
+  height: 28px;
+  position: relative;
+}
+
+.arrangement-clip-strip.placement-ready {
+  cursor: crosshair;
+}
+
+.arrangement-empty {
+  position: absolute;
+  left: 8px;
+  top: 6px;
+  font-size: 11px;
+  color: #666;
+  pointer-events: none;
+}
+
+.arrangement-clip {
+  position: absolute;
+  top: 0;
+  min-width: 8px;
+  height: 28px;
+  border-right: 1px solid #000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  color: #000;
+  cursor: default;
+  user-select: none;
+}
+
+.arrangement-clip.draggable {
+  cursor: grab;
+}
+
+.arrangement-clip.draggable:active {
+  cursor: grabbing;
+}
+
+/* Free-mode overlap — under clips fade, top clips stay slightly see-through */
+.arrangement-clip.overlap-under {
+  opacity: 0.42;
+}
+
+.arrangement-clip.overlap-over {
+  opacity: 0.72;
+  outline: 1px dashed rgba(0, 0, 0, 0.55);
+  outline-offset: -1px;
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.35) inset;
+}
+
+.arrangement-clip.overlap-under.overlap-over {
+  opacity: 0.52;
+}
+
+.arrangement-clip.missing {
+  background: #ccc !important;
+}
+
+.arrangement-clip-label {
+  font-size: 9px;
+  font-weight: bold;
+  line-height: 1;
+  pointer-events: none;
+}
+
+.arrangement-clip-actions {
+  position: absolute;
+  top: 1px;
+  right: 1px;
+  display: flex;
+  align-items: center;
+  gap: 1px;
+  z-index: 1;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.arrangement-clip:hover .arrangement-clip-actions,
+.arrangement-clip:focus-within .arrangement-clip-actions {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.arrangement-clip-action,
+.arrangement-clip-remove,
+.arrangement-clip-stack {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 11px;
+  height: 11px;
+  padding: 0;
+  min-width: 0;
+  font-size: 7px;
+  line-height: 1;
+  border: 1px solid #000;
+  background: rgba(255, 255, 255, 0.92);
+  cursor: pointer;
+}
+
+.arrangement-clip-remove {
+  font-size: 9px;
+  font-weight: bold;
+}
+
+.arrangement-clip-stack.active {
+  background: #000;
+  color: #fff;
+  font-weight: bold;
+}
+
+.arrangement-playhead {
+  position: absolute;
+  top: 0;
+  height: 100%;
+  width: 2px;
+  background: #000;
+  pointer-events: none;
+  z-index: 2;
+}
+
+.arrangement-add-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.arrangement-add-controls input[type="number"] {
+  font-family: inherit;
+  font-size: inherit;
+  border: 1px solid #000;
+  padding: 2px 4px;
+  width: 48px;
+}
+
+.arrangement-add-controls label {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+}
+
+.chop-picker {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.chop-picker-empty {
+  margin: 0;
+}
+
+.chop-picker-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid #000;
+  background: #fff;
+  padding: 4px 8px;
+  font-family: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.chop-picker-item.selected {
+  border-width: 2px;
+  font-weight: bold;
+}
+
+.chop-picker-swatch {
+  width: 14px;
+  height: 14px;
+  border: 1px solid #000;
+  flex-shrink: 0;
+}
+
+.chop-picker-number {
+  font-weight: bold;
+}
+
+.chop-picker-duration {
+  color: #333;
+}
+
+.chop-picker-key {
+  min-width: 1ch;
+  text-align: center;
 }

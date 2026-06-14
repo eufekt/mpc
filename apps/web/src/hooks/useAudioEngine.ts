@@ -308,6 +308,7 @@ export function useAudioEngine() {
       try {
         const response = await fetch("/api/youtube/audio", {
           method: "POST",
+          cache: "no-store",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ url }),
         });
@@ -419,7 +420,15 @@ export function useAudioEngine() {
         for (const req of requests) {
           const buffer = buffersRef.current.get(req.trackId);
           if (!buffer) continue;
-          const source = playSliceLoop(ctx, buffer, req.start, req.end, gain, req.volume);
+          const source = playSliceLoop(
+            ctx,
+            buffer,
+            req.start,
+            req.end,
+            gain,
+            req.volume,
+            req.timeStretch,
+          );
           sources.push({ trackId: req.trackId, source, req });
         }
         if (sources.length === 0) return;
@@ -453,7 +462,16 @@ export function useAudioEngine() {
           stopPad(req.trackId, req.key);
         }
 
-        const source = playSlice(ctx, buffer, req.start, req.end, gain, req.volume);
+        const source = playSlice(
+          ctx,
+          buffer,
+          req.start,
+          req.end,
+          gain,
+          req.volume,
+          0,
+          req.timeStretch,
+        );
         const sourceKey = padSourceKey(req.trackId, req.key);
         const startedAt = ctx.currentTime;
         const playback: ActivePlayback = {
@@ -488,6 +506,11 @@ export function useAudioEngine() {
     [getContext, resume, stopLoop, stopPad, pauseTrack],
   );
 
+  const getMasterGain = useCallback(() => {
+    getContext();
+    return gainNodeRef.current;
+  }, [getContext]);
+
   return {
     loading,
     error,
@@ -513,5 +536,7 @@ export function useAudioEngine() {
     getPlaybackTime,
     resume,
     setVolume,
+    getContext,
+    getMasterGain,
   };
 }

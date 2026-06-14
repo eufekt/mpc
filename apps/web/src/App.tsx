@@ -1,4 +1,5 @@
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { ArrangementSection } from "./components/ArrangementSection";
 import { FileUpload } from "./components/FileUpload";
 import { PadRow } from "./components/PadRow";
 import { TrackList } from "./components/TrackList";
@@ -6,13 +7,23 @@ import { TrackModal } from "./components/TrackModal";
 import { TrackPanel } from "./components/TrackPanel";
 import { TracksSection } from "./components/TracksSection";
 import { UrlInput } from "./components/UrlInput";
+import {
+  ConfigMenuBody,
+  ConfigMenuTrigger,
+  useConfigMenu,
+} from "./components/ConfigMenu";
+import { MidiDebugPanel } from "./components/MidiDebugPanel";
+import { SettingsPanel } from "./components/SettingsPanel";
+import { useArrangementPlayer } from "./hooks/useArrangementPlayer";
 import { useAudioEngine } from "./hooks/useAudioEngine";
+import { useMidiInput } from "./hooks/useMidiInput";
 import {
   useSamplerKeyboard,
   type SelectedChop,
 } from "./hooks/useSamplerKeyboard";
 import { useSessionPersistence } from "./hooks/useSessionPersistence";
-import { createTrack, useSessionState } from "./hooks/useSessionState";
+import { createTrack, createArrangementLane, useSessionState } from "./hooks/useSessionState";
+import { normalizeTimeStretch } from "./lib/chopPlayback";
 import {
   getAssignedKeys,
   getChopsForKey,
@@ -35,6 +46,19 @@ export default function App() {
     setPadMode,
     setVolume,
     restoreSession,
+    resetSession,
+    addLane,
+    removeLane,
+    updateLaneMeta,
+    addClip,
+    removeClip,
+    reorderClip,
+    setLaneMode,
+    moveClip,
+    addClipAt,
+    setClipStackMode,
+    setLaneMute,
+    setLaneVolume,
   } = useSessionState();
 
   const [selectedChop, setSelectedChop] = useState<SelectedChop | null>(null);
@@ -42,9 +66,78 @@ export default function App() {
   const [activeKey, setActiveKey] = useState<string | null>(null);
   const [playMode, setPlayMode] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
-
+  const [playheadTime, setPlayheadTime] = useState(0);
+  const configMenu = useConfigMenu();
   const activeTrackId = session.activeTrackId;
+  const arrangementPlayer = useArrangementPlayer({
+    lanes: session.arrangement.lanes,
+    tracks: session.tracks,
+    getBuffer: (trackId) => engine.getBuffer(trackId) ?? undefined,
+    getContext: engine.getContext,
+    getMasterGain: engine.getMasterGain,
+    resume: engine.resume,
+    masterVolume: session.volume,
+  });
+
+  useEffect(() => {
+    if (!arrangementPlayer.isPlaying) {
+      setPlayheadTime(arrangementPlayer.seekTime);
+      return;
+    }
+
+    let frameId = 0;
+    const tick = () => {
+      setPlayheadTime(arrangementPlayer.getPlayheadTime());
+      frameId = window.requestAnimationFrame(tick);
+    };
+    frameId = window.requestAnimationFrame(tick);
+    return () => window.cancelAnimationFrame(frameId);
+  }, [
+    arrangementPlayer.isPlaying,
+    arrangementPlayer.version,
+    arrangementPlayer.seekTime,
+    arrangementPlayer,
+  ]);
+
+  const stopArrangement = useCallback(() => {
+    arrangementPlayer.stop();
+  }, [arrangementPlayer]);
+
+  const playArrangement = useCallback(async () => {
+    engine.stopAllPlayback();
+    engine.stopLoop();
+    await arrangementPlayer.play();
+  }, [arrangementPlayer, engine]);
+
   const hasAudio = engine.loadedTrackIds.length > 0;
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.code !== "Space") return;
+      const target = event.target;
+      if (
+        target instanceof HTMLInputElement ||
+        target instanceof HTMLTextAreaElement ||
+        target instanceof HTMLSelectElement
+      ) {
+        return;
+      }
+      if (!hasAudio) return;
+      event.preventDefault();
+      if (arrangementPlayer.isPlaying) {
+        stopArrangement();
+      } else {
+        void playArrangement();
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [
+    arrangementPlayer.isPlaying,
+    hasAudio,
+    playArrangement,
+    stopArrangement,
+  ]);
 
   const loadedTracks = useMemo(
     () =>
@@ -52,7 +145,8 @@ export default function App() {
     [session.tracks, engine.loadedTrackIds],
   );
 
-  const { persistTrackAudio } = useSessionPersistence({
+  const { persistTrackAudio, cancelPendingRestore, clearPersistedSession } =
+    useSessionPersistence({
     engine,
     session,
     restoreSession,
@@ -83,12 +177,13 @@ export default function App() {
 
   const playKey = useCallback(
     (key: string) => {
+      stopArrangement();
       const bound = getChopsForKey(session.tracks, key);
       const requests = toChopPlayRequests(bound);
       if (requests.length === 0) return;
       void engine.playChops(requests, session.padMode);
     },
-    [engine, session.tracks, session.padMode],
+    [engine, session.tracks, session.padMode, stopArrangement],
   );
 
   const flashPad = useCallback((key: string) => {
@@ -105,6 +200,45 @@ export default function App() {
     },
     [selectedChop, bindKey],
   );
+
+  const handleMidiPad = useCallback(
+    (padKey: string) => {
+      void engine.resume();
+      const key = padKey.toLowerCase();
+
+      if (selectedChop) {
+        const track = session.tracks.find((t) => t.id === selectedChop.trackId);
+        const chop = track?.chops.find((c) => c.id === selectedChop.chopId);
+        if (chop?.key?.toUpperCase() === padKey) {
+          flashPad(padKey);
+          playKey(key);
+          setSelectedChop(null);
+          return;
+        }
+        handleBindKey(selectedChop.trackId, key);
+        return;
+      }
+
+      if (!playMode || !hasAudio) return;
+
+      if (getChopsForKey(session.tracks, key).length > 0) {
+        flashPad(padKey);
+        playKey(key);
+      }
+    },
+    [
+      engine,
+      selectedChop,
+      session.tracks,
+      playMode,
+      hasAudio,
+      flashPad,
+      playKey,
+      handleBindKey,
+    ],
+  );
+
+  const midi = useMidiInput({ onPadTrigger: handleMidiPad });
 
   useSamplerKeyboard({
     tracks: session.tracks,
@@ -124,6 +258,7 @@ export default function App() {
     load: (trackId: string) => Promise<Blob | File>,
     trackMeta: Parameters<typeof createTrack>[0],
   ) => {
+    cancelPendingRestore();
     const track = createTrack(trackMeta);
     addTrack(track);
     setSelectedChop(null);
@@ -248,6 +383,21 @@ export default function App() {
     [session.tracks, updateChops],
   );
 
+  const handleChopTimeStretchChange = useCallback(
+    (trackId: string, chopId: string, timeStretch: number) => {
+      const track = session.tracks.find((t) => t.id === trackId);
+      if (!track) return;
+      const normalized = normalizeTimeStretch(timeStretch);
+      updateChops(
+        trackId,
+        track.chops.map((c) =>
+          c.id === chopId ? { ...c, timeStretch: normalized } : c,
+        ),
+      );
+    },
+    [session.tracks, updateChops],
+  );
+
   const trackTransport = useMemo(
     () => ({
       getSeekTime: engine.getSeekTime,
@@ -269,9 +419,36 @@ export default function App() {
 
   const activeTrack = session.tracks.find((t) => t.id === activeTrackId) ?? null;
 
+  const handleClearSavedData = useCallback(async () => {
+    const confirmed = window.confirm(
+      "Clear all saved data in this browser? This removes tracks, chops, audio, session settings, and MIDI mappings. This cannot be undone.",
+    );
+    if (!confirmed) return;
+
+    cancelPendingRestore();
+    engine.stopLoop();
+    for (const trackId of engine.loadedTrackIds) {
+      engine.unloadTrack(trackId);
+    }
+    resetSession();
+    midi.clearBindings();
+    await clearPersistedSession();
+    setSelectedChop(null);
+    setLoadModalOpen(false);
+    setStatus("saved data cleared");
+    window.setTimeout(() => setStatus(null), 2000);
+  }, [
+    cancelPendingRestore,
+    clearPersistedSession,
+    engine,
+    midi,
+    resetSession,
+  ]);
+
   return (
     <main>
-      <section className="play-mode-bar">
+      <header className="top-bar">
+        <h1>MPC</h1>
         <button
           type="button"
           className={playMode ? "active" : undefined}
@@ -279,30 +456,64 @@ export default function App() {
         >
           PLAY
         </button>
-        <span className="hint">
-          {playMode ? "on — keys trigger chops" : "off — P to toggle"}
-        </span>
-      </section>
-
-      <h1>MPC — Music Production Center</h1>
-      <hr />
-
-      <section className="volume">
-        <label htmlFor="volume">VOLUME</label>
-        <input
-          id="volume"
-          type="range"
-          min={0}
-          max={100}
-          value={Math.round(session.volume * 100)}
-          onChange={(e) => {
-            const value = Number(e.target.value) / 100;
-            setVolume(value);
-            engine.setVolume(value);
-          }}
+        <ConfigMenuTrigger
+          menuOpen={configMenu.menuOpen}
+          onToggle={configMenu.toggleMenu}
         />
-        <span>{Math.round(session.volume * 100)}</span>
-      </section>
+        <div className="top-bar-volume">
+          <label htmlFor="volume">VOLUME</label>
+          <input
+            id="volume"
+            type="range"
+            min={0}
+            max={100}
+            value={Math.round(session.volume * 100)}
+            onChange={(e) => {
+              const value = Number(e.target.value) / 100;
+              setVolume(value);
+              engine.setVolume(value);
+            }}
+          />
+          <span>{Math.round(session.volume * 100)}</span>
+        </div>
+      </header>
+
+      <ConfigMenuBody
+        menuOpen={configMenu.menuOpen}
+        activeTab={configMenu.activeTab}
+        onSelectTab={configMenu.selectTab}
+        midiPanel={
+          <MidiDebugPanel
+            supported={midi.supported}
+            connected={midi.connected}
+            error={midi.error}
+            inputs={midi.inputs}
+            outputs={midi.outputs}
+            sysexEnabled={midi.sysexEnabled}
+            permissionState={midi.permissionState}
+            messages={midi.messages}
+            bindings={midi.bindings}
+            learnPad={midi.learnPad}
+            lastTrigger={midi.lastTrigger}
+            assignedKeys={assignedKeys}
+            playMode={playMode}
+            hasSelectedChop={selectedChop !== null}
+            onConnect={() => void midi.connect()}
+            onConnectSysex={() => void midi.connect({ sysex: true })}
+            onRescan={midi.rescan}
+            onDisconnect={midi.disconnect}
+            onArmLearn={midi.armLearn}
+            onCancelLearn={midi.cancelLearn}
+            onClearLog={midi.clearLog}
+            onRemoveBinding={midi.removeBinding}
+            onClearBindings={midi.clearBindings}
+            onMapEntryToPad={midi.mapEntryToPad}
+          />
+        }
+        settingsPanel={
+          <SettingsPanel onClearSavedData={handleClearSavedData} />
+        }
+      />
 
       <TracksSection
         trackCount={session.tracks.length}
@@ -385,10 +596,43 @@ export default function App() {
                   onDeleteChop={handleDeleteChop}
                   onChopColorChange={handleChopColorChange}
                   onChopVolumeChange={handleChopVolumeChange}
+                  onChopTimeStretchChange={handleChopTimeStretchChange}
+                  onRemoveTrack={handleRemoveTrack}
                 />
               );
             })}
           </div>
+
+          <hr />
+          <ArrangementSection
+            lanes={session.arrangement.lanes}
+            tracks={session.tracks}
+            loadedTrackIds={engine.loadedTrackIds}
+            isPlaying={arrangementPlayer.isPlaying}
+            playheadTime={playheadTime}
+            loop={arrangementPlayer.loop}
+            onPlay={() => void playArrangement()}
+            onStop={stopArrangement}
+            onSeek={arrangementPlayer.setSeekTime}
+            onLoopChange={arrangementPlayer.setLoop}
+            onAddLane={() => {
+              const laneNumber = session.arrangement.lanes.length + 1;
+              addLane(createArrangementLane(`Lane ${laneNumber}`));
+            }}
+            onRemoveLane={removeLane}
+            onRenameLane={(laneId, name) =>
+              updateLaneMeta(laneId, { name })
+            }
+            onSetMute={setLaneMute}
+            onSetVolume={setLaneVolume}
+            onSetLaneMode={setLaneMode}
+            onAddClip={addClip}
+            onAddClipAt={addClipAt}
+            onRemoveClip={removeClip}
+            onReorderClip={reorderClip}
+            onMoveClip={moveClip}
+            onSetClipStackMode={setClipStackMode}
+          />
         </>
       )}
 
@@ -434,6 +678,7 @@ export default function App() {
           />
         </>
       )}
+
     </main>
   );
 }

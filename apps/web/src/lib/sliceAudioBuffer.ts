@@ -21,12 +21,15 @@ export function playSlice(
   end: number,
   destination: AudioNode,
   volume = 1,
+  when = 0,
+  playbackRate = 1,
 ): AudioBufferSourceNode {
   const source = context.createBufferSource();
   source.buffer = buffer;
+  source.playbackRate.value = playbackRate;
   connectWithGain(context, source, destination, volume);
   const duration = Math.max(0, end - start);
-  source.start(0, start, duration);
+  source.start(when, start, duration);
   return source;
 }
 
@@ -51,12 +54,14 @@ export function playSliceLoop(
   end: number,
   destination: AudioNode,
   volume = 1,
+  playbackRate = 1,
 ): AudioBufferSourceNode {
   const source = context.createBufferSource();
   source.buffer = buffer;
   source.loop = true;
   source.loopStart = start;
   source.loopEnd = end;
+  source.playbackRate.value = playbackRate;
   connectWithGain(context, source, destination, volume);
   source.start(0, start);
   return source;

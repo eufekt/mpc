@@ -3,6 +3,7 @@ import { ChopTable } from "./ChopTable";
 import { WaveformEditor } from "./WaveformEditor";
 import type { PaletteMode } from "../lib/chopColors";
 import type { Chop, Track } from "../lib/types";
+import { formatTimePrecise } from "../lib/timeFormat";
 
 type TransportApi = {
   getSeekTime: (trackId: string) => number;
@@ -28,6 +29,12 @@ type Props = {
   onDeleteChop: (trackId: string, chopId: string) => void;
   onChopColorChange: (trackId: string, chopId: string, color: string) => void;
   onChopVolumeChange: (trackId: string, chopId: string, volume: number) => void;
+  onChopTimeStretchChange: (
+    trackId: string,
+    chopId: string,
+    timeStretch: number,
+  ) => void;
+  onRemoveTrack: (trackId: string) => void;
 };
 
 export const TrackPanel = memo(function TrackPanel({
@@ -45,6 +52,8 @@ export const TrackPanel = memo(function TrackPanel({
   onDeleteChop,
   onChopColorChange,
   onChopVolumeChange,
+  onChopTimeStretchChange,
+  onRemoveTrack,
 }: Props) {
   void transportVersion;
   const seekTime = transport.getSeekTime(track.id);
@@ -96,6 +105,13 @@ export const TrackPanel = memo(function TrackPanel({
     [onChopColorChange, track.id],
   );
 
+  const handleTableTimeStretchChange = useCallback(
+    (chopId: string, timeStretch: number) => {
+      onChopTimeStretchChange(track.id, chopId, timeStretch);
+    },
+    [onChopTimeStretchChange, track.id],
+  );
+
   return (
     <section
       className={["track-panel", isActive ? "active" : ""].filter(Boolean).join(" ")}
@@ -118,7 +134,17 @@ export const TrackPanel = memo(function TrackPanel({
           >
             {isPlaying ? "PAUSE" : "PLAY"}
           </button>
-          <span>POS {seekTime.toFixed(2)}</span>
+          <span>POS {formatTimePrecise(seekTime)}</span>
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              onRemoveTrack(track.id);
+            }}
+            aria-label={`remove track ${index + 1}`}
+          >
+            REMOVE
+          </button>
         </div>
       </header>
 
@@ -143,6 +169,7 @@ export const TrackPanel = memo(function TrackPanel({
           onSelect={handleSelectChop}
           onDelete={handleDeleteChop}
           onVolumeChange={handleTableVolumeChange}
+          onTimeStretchChange={handleTableTimeStretchChange}
           onColorChange={handleTableColorChange}
         />
       </div>

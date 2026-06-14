@@ -1,5 +1,6 @@
-import { useEffect, useMemo, useRef } from "react";
+import { useCallback, useEffect, useMemo, useRef } from "react";
 import {
+  clearSession,
   loadLegacyAudioBlob,
   loadSessionState,
   loadTrackAudio,
@@ -30,11 +31,26 @@ export function useSessionPersistence({
   onStatus,
 }: Params) {
   const isRestoringRef = useRef(false);
+  const suppressRestoreRef = useRef(false);
+  const restoreAbortRef = useRef<AbortController | null>(null);
+  const prevTrackCountRef = useRef<number | null>(null);
   const sessionRef = useRef(session);
   sessionRef.current = session;
 
+  const cancelPendingRestore = useCallback(() => {
+    suppressRestoreRef.current = true;
+    restoreAbortRef.current?.abort();
+    isRestoringRef.current = false;
+  }, []);
+
+  const clearPersistedSession = useCallback(async () => {
+    cancelPendingRestore();
+    await clearSession();
+  }, [cancelPendingRestore]);
+
   useEffect(() => {
     const abort = new AbortController();
+    restoreAbortRef.current = abort;
     let statusTimer: number | undefined;
 
     const clearStatusLater = () => {
@@ -43,7 +59,17 @@ export function useSessionPersistence({
       }, 2000);
     };
 
+    const unloadRestoredTracks = (saved: SessionState) => {
+      for (const track of saved.tracks) {
+        if (engine.hasTrack(track.id)) {
+          engine.unloadTrack(track.id);
+        }
+      }
+    };
+
     (async () => {
+      if (suppressRestoreRef.current) return;
+
       const saved = loadSessionState();
       if (!saved || saved.tracks.length === 0) return;
 
@@ -52,13 +78,13 @@ export function useSessionPersistence({
 
       try {
         await engine.resume();
-        if (abort.signal.aborted) return;
+        if (abort.signal.aborted || suppressRestoreRef.current) return;
 
         const legacyBlob = await loadLegacyAudioBlob();
         const migratedFromV1 = legacyBlob !== null;
 
         for (const track of saved.tracks) {
-          if (abort.signal.aborted) return;
+          if (abort.signal.aborted || suppressRestoreRef.current) return;
 
           let blob = await loadTrackAudio(track.id);
 
@@ -73,14 +99,14 @@ export function useSessionPersistence({
             track.sourceUrl
           ) {
             blob = await engine.loadYouTubeUrl(track.id, track.sourceUrl);
-            if (abort.signal.aborted) return;
+            if (abort.signal.aborted || suppressRestoreRef.current) return;
             await saveTrackAudio(track.id, blob);
             continue;
           }
 
           if (blob) {
             const arrayBuffer = await blob.arrayBuffer();
-            if (abort.signal.aborted) return;
+            if (abort.signal.aborted || suppressRestoreRef.current) return;
             await engine.loadTrackAudio(
               track.id,
               arrayBuffer,
@@ -89,7 +115,7 @@ export function useSessionPersistence({
           }
         }
 
-        if (abort.signal.aborted) return;
+        if (abort.signal.aborted || suppressRestoreRef.current) return;
 
         const anyLoaded = saved.tracks.some((t) => engine.hasTrack(t.id));
         if (!anyLoaded) {
@@ -104,19 +130,21 @@ export function useSessionPersistence({
         onStatus("session restored");
         clearStatusLater();
       } catch (e) {
-        if (abort.signal.aborted) return;
+        if (abort.signal.aborted || suppressRestoreRef.current) return;
         const message = e instanceof Error ? e.message : "unknown error";
         onStatus(`restore failed: ${message}`);
         clearStatusLater();
       } finally {
-        if (!abort.signal.aborted) {
-          isRestoringRef.current = false;
+        isRestoringRef.current = false;
+        if (abort.signal.aborted || suppressRestoreRef.current) {
+          unloadRestoredTracks(saved);
         }
       }
     })();
 
     return () => {
       abort.abort();
+      restoreAbortRef.current = null;
       if (statusTimer !== undefined) {
         window.clearTimeout(statusTimer);
       }
@@ -129,6 +157,7 @@ export function useSessionPersistence({
       JSON.stringify({
         version: session.version,
         tracks: session.tracks,
+        arrangement: session.arrangement,
         paletteMode: session.paletteMode,
         padMode: session.padMode,
         volume: session.volume,
@@ -136,6 +165,7 @@ export function useSessionPersistence({
     [
       session.version,
       session.tracks,
+      session.arrangement,
       session.paletteMode,
       session.padMode,
       session.volume,
@@ -144,7 +174,18 @@ export function useSessionPersistence({
 
   useEffect(() => {
     if (isRestoringRef.current) return;
-    if (session.tracks.length === 0) return;
+
+    const trackCount = session.tracks.length;
+    const prevCount = prevTrackCountRef.current;
+    prevTrackCountRef.current = trackCount;
+
+    if (trackCount === 0) {
+      if (prevCount !== null && prevCount > 0) {
+        saveSessionState(session);
+      }
+      return;
+    }
+
     if (!session.tracks.some((t) => engine.hasTrack(t.id))) return;
     saveSessionState(session);
   }, [structuralSessionKey, engine.loadedTrackIds, session]);
@@ -168,5 +209,5 @@ export function useSessionPersistence({
     }
   };
 
-  return { persistTrackAudio };
+  return { persistTrackAudio, cancelPendingRestore, clearPersistedSession };
 }

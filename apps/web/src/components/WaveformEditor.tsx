@@ -10,14 +10,11 @@ import {
   type PaletteMode,
 } from "../lib/chopColors";
 import type { Chop } from "../lib/types";
+import { formatTimePrecise } from "../lib/timeFormat";
 import { audioBufferToWav } from "../lib/audioBufferToWav";
 
 const REGION_TIME_START = "region-time-start";
 const REGION_TIME_END = "region-time-end";
-
-function formatRegionTime(seconds: number): string {
-  return seconds.toFixed(2);
-}
 
 const REGION_TIME_LABEL_STYLE: Partial<CSSStyleDeclaration> = {
   flexShrink: "0",
@@ -45,7 +42,7 @@ function createRegionTimeContent(start: number, end: number): HTMLElement {
   const startEl = document.createElement("span");
   startEl.className = `region-time-label ${REGION_TIME_START}`;
   Object.assign(startEl.style, REGION_TIME_LABEL_STYLE);
-  startEl.textContent = formatRegionTime(start);
+  startEl.textContent = formatTimePrecise(start);
 
   const gapEl = document.createElement("span");
   gapEl.className = "region-time-gap";
@@ -55,7 +52,7 @@ function createRegionTimeContent(start: number, end: number): HTMLElement {
   const endEl = document.createElement("span");
   endEl.className = `region-time-label ${REGION_TIME_END}`;
   Object.assign(endEl.style, REGION_TIME_LABEL_STYLE);
-  endEl.textContent = formatRegionTime(end);
+  endEl.textContent = formatTimePrecise(end);
 
   root.append(startEl, gapEl, endEl);
   return root;
@@ -83,8 +80,8 @@ function updateRegionTimeLabels(region: Region): void {
   if (content?.classList.contains("region-time-labels")) {
     const startEl = content.querySelector(`.${REGION_TIME_START}`);
     const endEl = content.querySelector(`.${REGION_TIME_END}`);
-    if (startEl) startEl.textContent = formatRegionTime(region.start);
-    if (endEl) endEl.textContent = formatRegionTime(region.end);
+    if (startEl) startEl.textContent = formatTimePrecise(region.start);
+    if (endEl) endEl.textContent = formatTimePrecise(region.end);
     return;
   }
   region.setContent(createRegionTimeContent(region.start, region.end));
@@ -118,6 +115,39 @@ function positionPlaybackLine(
 function hidePlaybackLine(line: HTMLElement): void {
   line.style.opacity = "0";
   line.style.transform = "";
+}
+
+/** Pixels/sec when the waveform fits the container — also the minimum zoom level. */
+function fitPxPerSec(containerWidth: number, duration: number): number {
+  if (containerWidth <= 0 || duration <= 0) return 0;
+  return containerWidth / duration;
+}
+
+/**
+ * ZoomPlugin uses maxZoom as the exponential zoom ceiling. It must be >= the
+ * fit-to-width level or short clips invert zoom direction and snap min/max.
+ */
+function waveformMaxZoom(
+  containerWidth: number,
+  duration: number,
+  sampleRate: number,
+): number {
+  const fit = fitPxPerSec(containerWidth, duration);
+  return Math.max(fit, sampleRate);
+}
+
+function syncZoomPluginBounds(
+  zoom: InstanceType<typeof ZoomPlugin>,
+  maxZoom: number,
+): void {
+  const plugin = zoom as unknown as {
+    options: { maxZoom: number };
+    endZoom: number;
+    startZoom: number;
+  };
+  plugin.options.maxZoom = maxZoom;
+  plugin.endZoom = maxZoom;
+  plugin.startZoom = 0;
 }
 
 export function WaveformEditor({
@@ -155,10 +185,17 @@ export function WaveformEditor({
     const regions = RegionsPlugin.create();
     regionsRef.current = regions;
 
+    const initialMaxZoom = waveformMaxZoom(
+      container.clientWidth,
+      buffer.duration,
+      buffer.sampleRate,
+    );
+
     const zoom = ZoomPlugin.create({
-      maxZoom: buffer.sampleRate,
+      maxZoom: initialMaxZoom,
       exponentialZooming: true,
       iterations: 30,
+      deltaThreshold: 0,
     });
 
     const hover = HoverPlugin.create({
@@ -167,7 +204,7 @@ export function WaveformEditor({
       labelColor: "#000",
       labelBackground: "#fff",
       labelSize: 8,
-      formatTimeCallback: formatRegionTime,
+      formatTimeCallback: formatTimePrecise,
     });
 
     const ws = WaveSurfer.create({
@@ -236,6 +273,7 @@ export function WaveformEditor({
           key: null,
           color,
           volume: 1,
+          timeStretch: 1,
         },
       ]);
     };
@@ -265,6 +303,13 @@ export function WaveformEditor({
     ws.load(url);
 
     const onReady = () => {
+      const maxZoom = waveformMaxZoom(
+        container.clientWidth,
+        ws.getDuration(),
+        buffer.sampleRate,
+      );
+      syncZoomPluginBounds(zoom, maxZoom);
+
       ws.getWrapper().appendChild(playbackLine);
       cancelAnimationFrame(raf);
       raf = requestAnimationFrame(playbackLoop);

@@ -1,4 +1,4 @@
-import type { Chop, Track } from "./types";
+import type { Chop, ChopPlayRequest, Track } from "./types";
 
 export type BoundChop = {
   trackId: string;
@@ -39,13 +39,7 @@ export function getChopsForKey(tracks: Track[], key: string): BoundChop[] {
   return result;
 }
 
-export function toChopPlayRequests(bound: BoundChop[]): Array<{
-  trackId: string;
-  start: number;
-  end: number;
-  key: string;
-  volume: number;
-}> {
+export function toChopPlayRequests(bound: BoundChop[]): ChopPlayRequest[] {
   return bound
     .filter((b) => b.chop.key)
     .map((b) => ({
@@ -54,5 +48,6 @@ export function toChopPlayRequests(bound: BoundChop[]): Array<{
       end: b.chop.end,
       key: b.chop.key!,
       volume: b.chop.volume,
+      timeStretch: b.chop.timeStretch,
     }));
 }

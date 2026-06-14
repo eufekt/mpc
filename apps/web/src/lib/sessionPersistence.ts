@@ -1,9 +1,14 @@
 import type { PaletteMode } from "./chopColors";
+import { clearMidiBindings } from "./midiMappings";
 import { getColorForIndex } from "./chopColors";
+import { normalizeTimeStretch } from "./chopPlayback";
 import type {
+  ArrangementClip,
+  ArrangementLane,
   Chop,
   PadMode,
   SavedSessionMetaV1,
+  SavedSessionMetaV2,
   SessionState,
   SourceType,
   Track,
@@ -27,9 +32,11 @@ function openDb(): Promise<IDBDatabase> {
   });
 }
 
-type RawSessionMeta = Partial<SessionState | SavedSessionMetaV1> & {
+type RawSessionMeta = Partial<SessionState | SavedSessionMetaV1 | SavedSessionMetaV2> & {
   version?: number;
   chops?: Partial<Chop>[];
+  tracks?: Partial<Track>[];
+  arrangement?: { lanes?: Partial<ArrangementLane>[] };
 };
 
 export function normalizeSavedChops(
@@ -43,10 +50,26 @@ export function normalizeSavedChops(
     key: chop.key ?? null,
     color: chop.color ?? getColorForIndex(paletteMode, index),
     volume: typeof chop.volume === "number" ? chop.volume : 1,
+    timeStretch:
+      typeof chop.timeStretch === "number"
+        ? normalizeTimeStretch(chop.timeStretch)
+        : 1,
   }));
 }
 
-function migrateV1ToV2(v1: SavedSessionMetaV1): SessionState {
+function emptyArrangement(): SessionState["arrangement"] {
+  return { lanes: [] };
+}
+
+function migrateV2ToV3(v2: SavedSessionMetaV2): SessionState {
+  return {
+    ...v2,
+    version: 3,
+    arrangement: emptyArrangement(),
+  };
+}
+
+function migrateV1ToV2(v1: SavedSessionMetaV1): SavedSessionMetaV2 {
   const trackId = createTrackId();
   return {
     version: 2,
@@ -64,6 +87,36 @@ function migrateV1ToV2(v1: SavedSessionMetaV1): SessionState {
     padMode: v1.padMode,
     volume: v1.volume,
   };
+}
+
+function normalizeArrangementClip(
+  clip: Partial<ArrangementClip>,
+  index: number,
+): ArrangementClip | null {
+  if (!clip.sourceTrackId || !clip.chopId) return null;
+  return {
+    id: clip.id ?? `clip-${index}`,
+    sourceTrackId: clip.sourceTrackId,
+    chopId: clip.chopId,
+    startTime: typeof clip.startTime === "number" ? clip.startTime : 0,
+    stackMode: clip.stackMode === "clamp" ? "clamp" : "overflow",
+  };
+}
+
+function normalizeArrangementLanes(
+  lanes: Partial<ArrangementLane>[] | undefined,
+): ArrangementLane[] {
+  if (!Array.isArray(lanes)) return [];
+  return lanes.map((lane, laneIndex) => ({
+    id: lane.id ?? `lane-${laneIndex}`,
+    name: lane.name ?? `Lane ${laneIndex + 1}`,
+    mute: lane.mute === true,
+    volume: typeof lane.volume === "number" ? lane.volume : 1,
+    mode: lane.mode === "free" ? "free" : "clamped",
+    clips: (lane.clips ?? [])
+      .map((clip, clipIndex) => normalizeArrangementClip(clip, clipIndex))
+      .filter((clip): clip is ArrangementClip => clip !== null),
+  }));
 }
 
 function parseV1(parsed: RawSessionMeta): SavedSessionMetaV1 | null {
@@ -92,19 +145,12 @@ function parseV1(parsed: RawSessionMeta): SavedSessionMetaV1 | null {
   };
 }
 
-function parseV2(parsed: RawSessionMeta): SessionState | null {
-  if (parsed.version !== 2) return null;
+function parseTracks(
+  parsed: RawSessionMeta,
+  paletteMode: PaletteMode,
+): Track[] | null {
   if (!Array.isArray(parsed.tracks)) return null;
-
-  const paletteMode = parsed.paletteMode === "acidic" ? "acidic" : "pastel";
-  const padMode: PadMode =
-    parsed.padMode === "clear" ||
-    parsed.padMode === "loop" ||
-    parsed.padMode === "layer"
-      ? parsed.padMode
-      : "layer";
-
-  const tracks: Track[] = parsed.tracks.map((track, index) => ({
+  return parsed.tracks.map((track, index) => ({
     id: track.id ?? `track-${index}`,
     sourceType:
       track.sourceType === "youtube" || track.sourceType === "file"
@@ -114,6 +160,21 @@ function parseV2(parsed: RawSessionMeta): SessionState | null {
     sourceUrl: track.sourceUrl,
     chops: normalizeSavedChops(track.chops ?? [], paletteMode),
   }));
+}
+
+function parseV2(parsed: RawSessionMeta): SavedSessionMetaV2 | null {
+  if (parsed.version !== 2) return null;
+
+  const paletteMode = parsed.paletteMode === "acidic" ? "acidic" : "pastel";
+  const padMode: PadMode =
+    parsed.padMode === "clear" ||
+    parsed.padMode === "loop" ||
+    parsed.padMode === "layer"
+      ? parsed.padMode
+      : "layer";
+
+  const tracks = parseTracks(parsed, paletteMode);
+  if (!tracks) return null;
 
   const activeTrackId =
     typeof parsed.activeTrackId === "string" &&
@@ -131,6 +192,39 @@ function parseV2(parsed: RawSessionMeta): SessionState | null {
   };
 }
 
+function parseV3(parsed: RawSessionMeta): SessionState | null {
+  if (parsed.version !== 3) return null;
+
+  const paletteMode = parsed.paletteMode === "acidic" ? "acidic" : "pastel";
+  const padMode: PadMode =
+    parsed.padMode === "clear" ||
+    parsed.padMode === "loop" ||
+    parsed.padMode === "layer"
+      ? parsed.padMode
+      : "layer";
+
+  const tracks = parseTracks(parsed, paletteMode);
+  if (!tracks) return null;
+
+  const activeTrackId =
+    typeof parsed.activeTrackId === "string" &&
+    tracks.some((t) => t.id === parsed.activeTrackId)
+      ? parsed.activeTrackId
+      : (tracks[0]?.id ?? null);
+
+  return {
+    version: 3,
+    tracks,
+    arrangement: {
+      lanes: normalizeArrangementLanes(parsed.arrangement?.lanes),
+    },
+    activeTrackId,
+    paletteMode,
+    padMode,
+    volume: typeof parsed.volume === "number" ? parsed.volume : 1,
+  };
+}
+
 /** v1 used a single blob key; v2 stores one blob per track id. */
 export function loadSessionState(): SessionState | null {
   try {
@@ -138,11 +232,14 @@ export function loadSessionState(): SessionState | null {
     if (!raw) return null;
     const parsed = JSON.parse(raw) as RawSessionMeta;
 
+    const v3 = parseV3(parsed);
+    if (v3) return v3;
+
     const v2 = parseV2(parsed);
-    if (v2) return v2;
+    if (v2) return migrateV2ToV3(v2);
 
     const v1 = parseV1(parsed);
-    if (v1) return migrateV1ToV2(v1);
+    if (v1) return migrateV2ToV3(migrateV1ToV2(v1));
 
     return null;
   } catch {
@@ -151,6 +248,10 @@ export function loadSessionState(): SessionState | null {
 }
 
 export function saveSessionState(state: SessionState): void {
+  if (state.tracks.length === 0) {
+    localStorage.removeItem(META_KEY);
+    return;
+  }
   localStorage.setItem(META_KEY, JSON.stringify(state));
 }
 
@@ -229,6 +330,7 @@ export async function deleteTrackAudio(trackId: string): Promise<void> {
 
 export async function clearSession(): Promise<void> {
   localStorage.removeItem(META_KEY);
+  clearMidiBindings();
   try {
     const db = await openDb();
     await new Promise<void>((resolve, reject) => {
