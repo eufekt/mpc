@@ -3,6 +3,7 @@ type Props = {
   onAccentColorChange: (color: string) => void;
   paletteMode: "pastel" | "acidic";
   onPaletteModeChange: (mode: "pastel" | "acidic") => void;
+  projectName: string;
   onClearSavedData: () => void;
 };
 
@@ -11,6 +12,7 @@ export function SettingsPanel({
   onAccentColorChange,
   paletteMode,
   onPaletteModeChange,
+  projectName,
   onClearSavedData,
 }: Props) {
   return (
@@ -45,10 +47,10 @@ export function SettingsPanel({
       </label>
       <p className="hint">
         Clears tracks, chops, saved audio, session preferences, and MIDI pad
-        mappings stored in this browser.
+        mappings for the active project ({projectName}) in this browser.
       </p>
       <button type="button" onClick={onClearSavedData}>
-        CLEAR SAVED DATA
+        CLEAR PROJECT DATA
       </button>
     </section>
   );

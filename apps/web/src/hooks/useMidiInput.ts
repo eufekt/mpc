@@ -19,6 +19,7 @@ import {
 const MAX_LOG = 80;
 
 type Options = {
+  projectId: string;
   onPadTrigger?: (padKey: string) => void;
 };
 
@@ -49,7 +50,7 @@ function collectPorts(access: MIDIAccess): {
   return { inputs, outputs };
 }
 
-export function useMidiInput({ onPadTrigger }: Options = {}) {
+export function useMidiInput({ projectId, onPadTrigger }: Options) {
   const [supported] = useState(() => "requestMIDIAccess" in navigator);
   const [connected, setConnected] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -58,9 +59,7 @@ export function useMidiInput({ onPadTrigger }: Options = {}) {
   const [sysexEnabled, setSysexEnabled] = useState(false);
   const [permissionState, setPermissionState] = useState<string | null>(null);
   const [messages, setMessages] = useState<MidiLogEntry[]>([]);
-  const [bindings, setBindings] = useState<MidiBinding[]>(() =>
-    loadMidiBindings(),
-  );
+  const [bindings, setBindings] = useState<MidiBinding[]>([]);
   const [learnPad, setLearnPad] = useState<string | null>(null);
   const [lastTrigger, setLastTrigger] = useState<string | null>(null);
 
@@ -98,23 +97,23 @@ export function useMidiInput({ onPadTrigger }: Options = {}) {
         ...prev.filter((b) => bindingKeyFromBinding(b) !== key),
         binding,
       ];
-      saveMidiBindings(next);
+      saveMidiBindings(projectId, next);
       return next;
     });
-  }, []);
+  }, [projectId]);
 
   const removeBinding = useCallback((key: string) => {
     setBindings((prev) => {
       const next = prev.filter((b) => bindingKeyFromBinding(b) !== key);
-      saveMidiBindings(next);
+      saveMidiBindings(projectId, next);
       return next;
     });
-  }, []);
+  }, [projectId]);
 
   const clearBindings = useCallback(() => {
     setBindings([]);
-    clearMidiBindings();
-  }, []);
+    clearMidiBindings(projectId);
+  }, [projectId]);
 
   const handleEntry = useCallback(
     (entry: MidiLogEntry) => {
@@ -291,6 +290,11 @@ export function useMidiInput({ onPadTrigger }: Options = {}) {
     },
     [upsertBinding],
   );
+
+  useEffect(() => {
+    setBindings(loadMidiBindings(projectId));
+    setLearnPad(null);
+  }, [projectId]);
 
   useEffect(() => {
     return () => {

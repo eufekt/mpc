@@ -1,13 +1,17 @@
 import { useCallback, useEffect, useMemo, useRef } from "react";
+import { DEFAULT_LANE_ROW_HEIGHT } from "../lib/arrangement";
+import { loadProjectsIndex, touchProject } from "../lib/projectPersistence";
 import {
-  clearSession,
+  clearProject,
   loadLegacyAudioBlob,
   loadSessionState,
   loadTrackBlob,
+  migrateLegacyAudioForProject,
   migrateLegacyBlobToTrack,
   saveSessionState,
   saveTrackAudio,
 } from "../lib/sessionPersistence";
+import { DEFAULT_ACCENT_COLOR } from "../lib/transport";
 import type { SessionState } from "../lib/types";
 import type { useAudioEngine } from "./useAudioEngine";
 import type { useSessionState } from "./useSessionState";
@@ -16,24 +20,27 @@ type Engine = ReturnType<typeof useAudioEngine>;
 type SessionApi = ReturnType<typeof useSessionState>;
 
 type Params = {
+  projectId: string;
   engine: Engine;
   session: SessionState;
   restoreSession: SessionApi["restoreSession"];
   setVolume: SessionApi["setVolume"];
   onStatus: (message: string | null) => void;
+  onProjectsIndexChange?: () => void;
 };
 
 export function useSessionPersistence({
+  projectId,
   engine,
   session,
   restoreSession,
   setVolume,
   onStatus,
+  onProjectsIndexChange,
 }: Params) {
   const isRestoringRef = useRef(false);
   const suppressRestoreRef = useRef(false);
   const restoreAbortRef = useRef<AbortController | null>(null);
-  const prevTrackCountRef = useRef<number | null>(null);
   const sessionRef = useRef(session);
   sessionRef.current = session;
 
@@ -45,10 +52,18 @@ export function useSessionPersistence({
 
   const clearPersistedSession = useCallback(async () => {
     cancelPendingRestore();
-    await clearSession();
-  }, [cancelPendingRestore]);
+    await clearProject(projectId);
+    onProjectsIndexChange?.();
+  }, [cancelPendingRestore, onProjectsIndexChange, projectId]);
+
+  const flushSessionSave = useCallback(() => {
+    saveSessionState(projectId, sessionRef.current);
+    touchProject(loadProjectsIndex(), projectId);
+    onProjectsIndexChange?.();
+  }, [onProjectsIndexChange, projectId]);
 
   useEffect(() => {
+    suppressRestoreRef.current = false;
     const abort = new AbortController();
     restoreAbortRef.current = abort;
     let statusTimer: number | undefined;
@@ -70,13 +85,30 @@ export function useSessionPersistence({
     (async () => {
       if (suppressRestoreRef.current) return;
 
-      const saved = loadSessionState();
-      if (!saved || saved.tracks.length === 0) return;
+      const saved = loadSessionState(projectId);
+      if (!saved) {
+        restoreSession({
+          version: 3,
+          tracks: [],
+          arrangement: { lanes: [], laneRowHeight: DEFAULT_LANE_ROW_HEIGHT },
+          activeTrackId: null,
+          paletteMode: "pastel",
+          padMode: "layer",
+          volume: 1,
+          accentColor: DEFAULT_ACCENT_COLOR,
+        });
+        return;
+      }
 
       isRestoringRef.current = true;
-      onStatus("restoring session...");
+      onStatus("restoring project...");
 
       try {
+        await migrateLegacyAudioForProject(
+          projectId,
+          saved.tracks.map((track) => track.id),
+        );
+
         await engine.resume();
         if (abort.signal.aborted || suppressRestoreRef.current) return;
 
@@ -86,11 +118,11 @@ export function useSessionPersistence({
         for (const track of saved.tracks) {
           if (abort.signal.aborted || suppressRestoreRef.current) return;
 
-          let blob = await loadTrackBlob(track.id);
+          let blob = await loadTrackBlob(projectId, track.id);
 
           if (!blob && migratedFromV1 && track.id === saved.tracks[0]?.id) {
             blob = legacyBlob;
-            await migrateLegacyBlobToTrack(track.id);
+            await migrateLegacyBlobToTrack(projectId, track.id);
           }
 
           if (
@@ -100,7 +132,7 @@ export function useSessionPersistence({
           ) {
             blob = await engine.loadYouTubeUrl(track.id, track.sourceUrl);
             if (abort.signal.aborted || suppressRestoreRef.current) return;
-            await saveTrackAudio(track.id, blob);
+            await saveTrackAudio(projectId, track.id, blob);
             continue;
           }
 
@@ -117,17 +149,19 @@ export function useSessionPersistence({
 
         if (abort.signal.aborted || suppressRestoreRef.current) return;
 
-        const anyLoaded = saved.tracks.some((t) => engine.hasTrack(t.id));
-        if (!anyLoaded) {
-          onStatus("restore failed: audio missing — reload your file or url");
-          clearStatusLater();
-          return;
+        if (saved.tracks.length > 0) {
+          const anyLoaded = saved.tracks.some((t) => engine.hasTrack(t.id));
+          if (!anyLoaded) {
+            onStatus("restore failed: audio missing — reload your file or url");
+            clearStatusLater();
+            return;
+          }
         }
 
         restoreSession(saved);
         setVolume(saved.volume);
         engine.setVolume(saved.volume);
-        onStatus("session restored");
+        onStatus("project restored");
         clearStatusLater();
       } catch (e) {
         if (abort.signal.aborted || suppressRestoreRef.current) return;
@@ -137,7 +171,7 @@ export function useSessionPersistence({
       } finally {
         isRestoringRef.current = false;
         if (abort.signal.aborted || suppressRestoreRef.current) {
-          unloadRestoredTracks(saved);
+          if (saved) unloadRestoredTracks(saved);
         }
       }
     })();
@@ -149,8 +183,7 @@ export function useSessionPersistence({
         window.clearTimeout(statusTimer);
       }
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- restore once on mount
-  }, []);
+  }, [engine, onStatus, projectId, restoreSession, setVolume]);
 
   const sessionSaveKey = useMemo(
     () =>
@@ -179,32 +212,29 @@ export function useSessionPersistence({
   useEffect(() => {
     if (isRestoringRef.current) return;
 
-    const trackCount = session.tracks.length;
-    const prevCount = prevTrackCountRef.current;
-    prevTrackCountRef.current = trackCount;
-
-    if (trackCount === 0) {
-      if (prevCount !== null && prevCount > 0) {
-        saveSessionState(session);
-      }
-      return;
-    }
-
-    if (!session.tracks.some((t) => engine.hasTrack(t.id))) return;
+    const hasLoadedTracks = session.tracks.some((t) => engine.hasTrack(t.id));
+    if (session.tracks.length > 0 && !hasLoadedTracks) return;
 
     const timer = window.setTimeout(() => {
-      saveSessionState(sessionRef.current);
+      saveSessionState(projectId, sessionRef.current);
+      touchProject(loadProjectsIndex(), projectId);
+      onProjectsIndexChange?.();
     }, 300);
 
     return () => window.clearTimeout(timer);
-  }, [sessionSaveKey, engine.loadedTrackIds]);
+  }, [sessionSaveKey, engine.loadedTrackIds, onProjectsIndexChange, projectId]);
 
   const persistTrackAudio = async (trackId: string, blob: Blob) => {
-    await saveTrackAudio(trackId, blob);
-    if (sessionRef.current.tracks.length > 0) {
-      saveSessionState(sessionRef.current);
-    }
+    await saveTrackAudio(projectId, trackId, blob);
+    saveSessionState(projectId, sessionRef.current);
+    touchProject(loadProjectsIndex(), projectId);
+    onProjectsIndexChange?.();
   };
 
-  return { persistTrackAudio, cancelPendingRestore, clearPersistedSession };
+  return {
+    persistTrackAudio,
+    cancelPendingRestore,
+    clearPersistedSession,
+    flushSessionSave,
+  };
 }
