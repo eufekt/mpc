@@ -7,9 +7,16 @@
   "scripts": {
     "dev": "concurrently -n web,api -c white,black \"npm run dev -w @mpc/web\" \"npm run dev -w @mpc/api\"",
     "build": "npm run build -w @mpc/web",
-    "typecheck": "npm run typecheck -w @mpc/web && npm run typecheck -w @mpc/api"
+    "build:cloudflare": "npm run build -w @mpc/web",
+    "deploy:cloudflare": "npm run build:cloudflare && wrangler deploy",
+    "cf:types": "wrangler types",
+    "typecheck": "npm run typecheck -w @mpc/web && npm run typecheck -w @mpc/api && tsc -p worker/tsconfig.json --noEmit"
   },
   "devDependencies": {
-    "concurrently": "^9.1.2"
+    "@cloudflare/containers": "^0.3.7",
+    "@cloudflare/workers-types": "^4.20260615.1",
+    "concurrently": "^9.1.2",
+    "typescript": "^5.8.3",
+    "wrangler": "^4.100.0"
   }
 }

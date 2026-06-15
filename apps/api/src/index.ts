@@ -6,7 +6,8 @@ import cors from "cors";
 import express from "express";
 
 const app = express();
-const PORT = 3001;
+const PORT = Number(process.env.PORT) || 3001;
+const HOST = process.env.HOST ?? "0.0.0.0";
 
 app.use(cors());
 app.use(express.json());
@@ -127,6 +128,10 @@ app.post("/api/youtube/metadata", async (req, res) => {
   }
 });
 
-app.listen(PORT, () => {
-  console.log(`mpc api listening on http://localhost:${PORT}`);
+app.get("/api/health", (_req, res) => {
+  res.json({ ok: true });
+});
+
+app.listen(PORT, HOST, () => {
+  console.log(`mpc api listening on http://${HOST}:${PORT}`);
 });
