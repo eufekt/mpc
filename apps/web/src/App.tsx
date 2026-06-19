@@ -10,6 +10,7 @@ import { TrackModal } from "./components/TrackModal";
 import { TrackPanel } from "./components/TrackPanel";
 import { UrlInput } from "./components/UrlInput";
 import { MidiDebugPanel } from "./components/MidiDebugPanel";
+import { ProjectsPanel } from "./components/ProjectsPanel";
 import { SettingsPanel } from "./components/SettingsPanel";
 import { useArrangementPlayer } from "./hooks/useArrangementPlayer";
 import { useAudioEngine } from "./hooks/useAudioEngine";
@@ -19,6 +20,7 @@ import {
   type SelectedChop,
 } from "./hooks/useSamplerKeyboard";
 import { useSessionPersistence } from "./hooks/useSessionPersistence";
+import { useProjects } from "./hooks/useProjects";
 import { createTrack, createArrangementLane, useSessionState } from "./hooks/useSessionState";
 import { filterLoadedTracks } from "./lib/arrangement";
 import type { PaletteMode } from "./lib/chopColors";
@@ -39,6 +41,17 @@ import type { TransportFocus } from "./lib/transport";
 
 export default function App() {
   const engine = useAudioEngine();
+  const {
+    projects,
+    activeProjectId,
+    activeProject,
+    createProject,
+    renameProject,
+    selectProject,
+    deleteProject,
+    refreshIndex,
+  } = useProjects();
+  const projectId = activeProjectId ?? projects[0]?.id ?? "";
   const {
     session,
     activeTrack,
@@ -86,6 +99,7 @@ export default function App() {
     pads: true,
   });
   const [midiPanelOpen, setMidiPanelOpen] = useState(false);
+  const [projectsPanelOpen, setProjectsPanelOpen] = useState(false);
   const [settingsPanelOpen, setSettingsPanelOpen] = useState(false);
   const activeTrackId = session.activeTrackId;
   const arrangementPlayer = useArrangementPlayer({
@@ -224,13 +238,15 @@ export default function App() {
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [handleSpaceTransport, hasAudio]);
 
-  const { persistTrackAudio, cancelPendingRestore, clearPersistedSession } =
+  const { persistTrackAudio, cancelPendingRestore, clearPersistedSession, flushSessionSave } =
     useSessionPersistence({
+      projectId,
       engine,
       session,
       restoreSession,
       setVolume,
       onStatus: setStatus,
+      onProjectsIndexChange: refreshIndex,
     });
 
   const assignedKeys = useMemo(
@@ -326,7 +342,7 @@ export default function App() {
     [handlePadInteraction],
   );
 
-  const midi = useMidiInput({ onPadTrigger: handleMidiPad });
+  const midi = useMidiInput({ projectId, onPadTrigger: handleMidiPad });
 
   useSamplerKeyboard({
     tracks: session.tracks,
@@ -405,7 +421,7 @@ export default function App() {
   const handleRemoveTrack = (trackId: string) => {
     engine.unloadTrack(trackId);
     removeTrack(trackId);
-    void deleteTrackAudio(trackId);
+    void deleteTrackAudio(projectId, trackId);
     if (selectedChop?.trackId === trackId) setSelectedChop(null);
   };
 
@@ -515,28 +531,80 @@ export default function App() {
     ],
   );
 
-  const handleClearSavedData = useCallback(async () => {
-    const confirmed = window.confirm(
-      "Clear all saved data in this browser? This removes tracks, chops, audio, session settings, and MIDI mappings. This cannot be undone.",
-    );
-    if (!confirmed) return;
-
+  const unloadEngineAndReset = useCallback(() => {
     cancelPendingRestore();
     engine.stopLoop();
+    arrangementPlayer.stop();
     for (const trackId of engine.loadedTrackIds) {
       engine.unloadTrack(trackId);
     }
     resetSession();
-    await clearPersistedSession();
     setSelectedChop(null);
     setLoadModalOpen(false);
-    setStatus("saved data cleared");
+  }, [arrangementPlayer, cancelPendingRestore, engine, resetSession]);
+
+  const handleLoadProject = useCallback(
+    async (nextProjectId: string) => {
+      if (!nextProjectId || nextProjectId === projectId) return;
+      flushSessionSave();
+      unloadEngineAndReset();
+      selectProject(nextProjectId);
+      setStatus("project loaded");
+      window.setTimeout(() => setStatus(null), 2000);
+    },
+    [flushSessionSave, projectId, selectProject, unloadEngineAndReset],
+  );
+
+  const handleCreateProject = useCallback(
+    (name: string) => {
+      flushSessionSave();
+      unloadEngineAndReset();
+      createProject(name);
+      setStatus(`created project: ${name.trim() || "Untitled"}`);
+      window.setTimeout(() => setStatus(null), 2000);
+    },
+    [createProject, flushSessionSave, unloadEngineAndReset],
+  );
+
+  const handleRenameProject = useCallback(
+    (nextProjectId: string, name: string) => {
+      renameProject(nextProjectId, name);
+      setStatus(`renamed project: ${name}`);
+      window.setTimeout(() => setStatus(null), 2000);
+    },
+    [renameProject],
+  );
+
+  const handleDeleteProject = useCallback(
+    async (nextProjectId: string) => {
+      const wasActive = nextProjectId === projectId;
+      await deleteProject(nextProjectId);
+      if (wasActive) {
+        unloadEngineAndReset();
+        setStatus("project deleted");
+        window.setTimeout(() => setStatus(null), 2000);
+      }
+    },
+    [deleteProject, projectId, unloadEngineAndReset],
+  );
+
+  const handleClearSavedData = useCallback(async () => {
+    const projectName = activeProject?.name ?? "this project";
+    const confirmed = window.confirm(
+      `Clear saved data for "${projectName}"? This removes tracks, chops, audio, session settings, and MIDI mappings for this project. This cannot be undone.`,
+    );
+    if (!confirmed) return;
+
+    unloadEngineAndReset();
+    await clearPersistedSession();
+    midi.clearBindings();
+    setStatus("project data cleared");
     window.setTimeout(() => setStatus(null), 2000);
   }, [
-    cancelPendingRestore,
+    activeProject?.name,
     clearPersistedSession,
-    engine,
-    resetSession,
+    midi,
+    unloadEngineAndReset,
   ]);
 
   return (
@@ -595,6 +663,19 @@ export default function App() {
         <div className="top-bar-panels-toggle">
           <button
             type="button"
+            className={projectsPanelOpen ? "active" : undefined}
+            onClick={() => setProjectsPanelOpen((prev) => !prev)}
+            aria-expanded={projectsPanelOpen}
+            title={
+              activeProject?.name
+                ? `Projects — active: ${activeProject.name}`
+                : "Projects"
+            }
+          >
+            PROJECTS
+          </button>
+          <button
+            type="button"
             className={midiPanelOpen ? "active" : undefined}
             onClick={() => setMidiPanelOpen((prev) => !prev)}
             aria-expanded={midiPanelOpen}
@@ -628,8 +709,18 @@ export default function App() {
         </div>
       </header>
 
-      {(midiPanelOpen || settingsPanelOpen) && (
+      {(projectsPanelOpen || midiPanelOpen || settingsPanelOpen) && (
         <div className="top-bar-panels">
+          {projectsPanelOpen && (
+            <ProjectsPanel
+              projects={projects}
+              activeProjectId={activeProjectId}
+              onCreateProject={handleCreateProject}
+              onLoadProject={(id) => void handleLoadProject(id)}
+              onRenameProject={handleRenameProject}
+              onDeleteProject={(id) => void handleDeleteProject(id)}
+            />
+          )}
           {midiPanelOpen && (
             <MidiDebugPanel
               midi={midi}
@@ -644,7 +735,8 @@ export default function App() {
               onAccentColorChange={setAccentColor}
               paletteMode={session.paletteMode}
               onPaletteModeChange={handlePaletteChange}
-              onClearSavedData={handleClearSavedData}
+              projectName={activeProject?.name ?? "Untitled"}
+              onClearSavedData={() => void handleClearSavedData()}
             />
           )}
         </div>

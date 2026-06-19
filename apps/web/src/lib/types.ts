@@ -67,6 +67,17 @@ export type SessionState = {
   accentColor: string;
 };
 
+export type ProjectMeta = {
+  id: string;
+  name: string;
+  updatedAt: number;
+};
+
+export type ProjectsIndex = {
+  activeProjectId: string | null;
+  projects: ProjectMeta[];
+};
+
 /** v2 layout — kept for migration from older saved sessions. */
 export type SavedSessionMetaV2 = {
   version: 2;

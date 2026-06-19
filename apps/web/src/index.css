@@ -128,7 +128,8 @@ input[type="text"] {
 }
 
 .top-bar-panels > .midi-panel,
-.top-bar-panels > .settings-panel {
+.top-bar-panels > .settings-panel,
+.top-bar-panels > .projects-panel {
   margin: 0;
   border: none;
   border-top: 1px solid #000;
@@ -637,6 +638,62 @@ pre {
   border: 1px solid #000;
   padding: 8px;
   gap: 8px;
+}
+
+.projects-panel {
+  border: 1px solid #000;
+  padding: 8px;
+  gap: 8px;
+}
+
+.projects-panel-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.projects-panel-header h2 {
+  margin: 0;
+}
+
+.projects-create {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.project-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.project-list li {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.project-list-name {
+  flex: 1 1 auto;
+}
+
+.project-list-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.project-list li.active .project-list-name {
+  font-weight: bold;
 }
 
 .settings-panel-header {

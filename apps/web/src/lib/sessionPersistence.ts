@@ -2,6 +2,10 @@ import type { PaletteMode } from "./chopColors";
 import { clearMidiBindings } from "./midiMappings";
 import { getColorForIndex } from "./chopColors";
 import { normalizeTimeStretch } from "./chopPlayback";
+import {
+  loadProjectsIndex,
+  sessionMetaKey,
+} from "./projectPersistence";
 import type {
   ArrangementClip,
   ArrangementLane,
@@ -21,11 +25,15 @@ import {
   DEFAULT_LANE_ROW_HEIGHT,
 } from "./arrangement";
 
-const META_KEY = "mpc-session";
 const DB_NAME = "mpc";
 const DB_VERSION = 1;
 const AUDIO_STORE = "audio";
 const LEGACY_AUDIO_KEY = "session";
+const LEGACY_META_KEY = "mpc-session";
+
+function audioKey(projectId: string, trackId: string): string {
+  return `${projectId}/${trackId}`;
+}
 
 function openDb(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
@@ -273,11 +281,8 @@ function parseV3(parsed: RawSessionMeta): SessionState | null {
   };
 }
 
-/** v1 used a single blob key; v2 stores one blob per track id. */
-export function loadSessionState(): SessionState | null {
+function parseSessionMeta(raw: string): SessionState | null {
   try {
-    const raw = localStorage.getItem(META_KEY);
-    if (!raw) return null;
     const parsed = JSON.parse(raw) as RawSessionMeta;
 
     const v3 = parseV3(parsed);
@@ -295,15 +300,26 @@ export function loadSessionState(): SessionState | null {
   }
 }
 
-export function saveSessionState(state: SessionState): void {
-  if (state.tracks.length === 0) {
-    localStorage.removeItem(META_KEY);
-    return;
+/** v1 used a single blob key; v2 stores one blob per track id. */
+export function loadSessionState(projectId: string): SessionState | null {
+  try {
+    const raw = localStorage.getItem(sessionMetaKey(projectId));
+    if (!raw) return null;
+    return parseSessionMeta(raw);
+  } catch {
+    return null;
   }
-  localStorage.setItem(META_KEY, JSON.stringify(state));
+}
+
+export function saveSessionState(
+  projectId: string,
+  state: SessionState,
+): void {
+  localStorage.setItem(sessionMetaKey(projectId), JSON.stringify(state));
 }
 
 export async function saveTrackAudio(
+  projectId: string,
   trackId: string,
   blob: Blob,
 ): Promise<void> {
@@ -318,11 +334,64 @@ export async function saveTrackAudio(
       db.close();
       reject(tx.error);
     };
-    tx.objectStore(AUDIO_STORE).put(blob, trackId);
+    tx.objectStore(AUDIO_STORE).put(blob, audioKey(projectId, trackId));
   });
 }
 
-export async function loadTrackBlob(trackId: string): Promise<Blob | null> {
+export async function loadTrackBlob(
+  projectId: string,
+  trackId: string,
+): Promise<Blob | null> {
+  const db = await openDb();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(AUDIO_STORE, "readonly");
+    const request = tx.objectStore(AUDIO_STORE).get(audioKey(projectId, trackId));
+    request.onerror = () => {
+      db.close();
+      reject(request.error);
+    };
+    request.onsuccess = () => {
+      db.close();
+      const result = request.result;
+      if (!result) {
+        resolve(null);
+        return;
+      }
+      if (result instanceof Blob) {
+        resolve(result);
+        return;
+      }
+      resolve(new Blob([result]));
+    };
+  });
+}
+
+export async function loadLegacyAudioBlob(): Promise<Blob | null> {
+  const db = await openDb();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(AUDIO_STORE, "readonly");
+    const request = tx.objectStore(AUDIO_STORE).get(LEGACY_AUDIO_KEY);
+    request.onerror = () => {
+      db.close();
+      reject(request.error);
+    };
+    request.onsuccess = () => {
+      db.close();
+      const result = request.result;
+      if (!result) {
+        resolve(null);
+        return;
+      }
+      if (result instanceof Blob) {
+        resolve(result);
+        return;
+      }
+      resolve(new Blob([result]));
+    };
+  });
+}
+
+export async function loadLegacyTrackBlob(trackId: string): Promise<Blob | null> {
   const db = await openDb();
   return new Promise((resolve, reject) => {
     const tx = db.transaction(AUDIO_STORE, "readonly");
@@ -347,20 +416,46 @@ export async function loadTrackBlob(trackId: string): Promise<Blob | null> {
   });
 }
 
-export async function loadLegacyAudioBlob(): Promise<Blob | null> {
-  return loadTrackBlob(LEGACY_AUDIO_KEY);
-}
-
 export async function migrateLegacyBlobToTrack(
+  projectId: string,
   trackId: string,
 ): Promise<void> {
   const legacy = await loadLegacyAudioBlob();
   if (!legacy) return;
-  await saveTrackAudio(trackId, legacy);
-  await deleteTrackAudio(LEGACY_AUDIO_KEY);
+  await saveTrackAudio(projectId, trackId, legacy);
+  await deleteAudioKey(LEGACY_AUDIO_KEY);
 }
 
-export async function deleteTrackAudio(trackId: string): Promise<void> {
+export async function migrateLegacyTrackBlob(
+  projectId: string,
+  trackId: string,
+): Promise<void> {
+  const legacy = await loadLegacyTrackBlob(trackId);
+  if (!legacy) return;
+  await saveTrackAudio(projectId, trackId, legacy);
+  await deleteAudioKey(trackId);
+}
+
+/** Moves legacy per-track audio blobs into the project namespace. */
+export async function migrateLegacyAudioForProject(
+  projectId: string,
+  trackIds: string[],
+): Promise<void> {
+  const legacySessionBlob = await loadLegacyAudioBlob();
+  if (legacySessionBlob && trackIds[0]) {
+    await saveTrackAudio(projectId, trackIds[0], legacySessionBlob);
+    await deleteAudioKey(LEGACY_AUDIO_KEY);
+  }
+
+  for (const trackId of trackIds) {
+    const blob = await loadLegacyTrackBlob(trackId);
+    if (!blob) continue;
+    await saveTrackAudio(projectId, trackId, blob);
+    await deleteAudioKey(trackId);
+  }
+}
+
+async function deleteAudioKey(key: string): Promise<void> {
   const db = await openDb();
   await new Promise<void>((resolve, reject) => {
     const tx = db.transaction(AUDIO_STORE, "readwrite");
@@ -372,13 +467,72 @@ export async function deleteTrackAudio(trackId: string): Promise<void> {
       db.close();
       reject(tx.error);
     };
-    tx.objectStore(AUDIO_STORE).delete(trackId);
+    tx.objectStore(AUDIO_STORE).delete(key);
   });
 }
 
-export async function clearSession(): Promise<void> {
-  localStorage.removeItem(META_KEY);
-  clearMidiBindings();
+export async function deleteTrackAudio(
+  projectId: string,
+  trackId: string,
+): Promise<void> {
+  await deleteAudioKey(audioKey(projectId, trackId));
+}
+
+export async function deleteProjectAudio(projectId: string): Promise<void> {
+  const prefix = `${projectId}/`;
+  const db = await openDb();
+  await new Promise<void>((resolve, reject) => {
+    const tx = db.transaction(AUDIO_STORE, "readwrite");
+    const store = tx.objectStore(AUDIO_STORE);
+    const request = store.openCursor();
+    request.onerror = () => {
+      db.close();
+      reject(request.error);
+    };
+    request.onsuccess = () => {
+      const cursor = request.result;
+      if (!cursor) return;
+      const key = String(cursor.key);
+      if (key.startsWith(prefix)) {
+        cursor.delete();
+      }
+      cursor.continue();
+    };
+    tx.oncomplete = () => {
+      db.close();
+      resolve();
+    };
+    tx.onerror = () => {
+      db.close();
+      reject(tx.error);
+    };
+  });
+}
+
+export async function clearProject(projectId: string): Promise<void> {
+  localStorage.removeItem(sessionMetaKey(projectId));
+  clearMidiBindings(projectId);
+  try {
+    await deleteProjectAudio(projectId);
+  } catch {
+    // indexedDB may be unavailable
+  }
+}
+
+export async function deleteProjectStorage(projectId: string): Promise<void> {
+  await clearProject(projectId);
+}
+
+export async function clearAllPersistedData(): Promise<void> {
+  const index = loadProjectsIndex();
+  for (const project of index.projects) {
+    localStorage.removeItem(sessionMetaKey(project.id));
+    clearMidiBindings(project.id);
+  }
+  localStorage.removeItem("mpc-projects");
+  localStorage.removeItem(LEGACY_META_KEY);
+  localStorage.removeItem("mpc-midi-bindings");
+
   try {
     const db = await openDb();
     await new Promise<void>((resolve, reject) => {
