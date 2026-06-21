@@ -9,23 +9,33 @@ import {
   regionFillColor,
   type PaletteMode,
 } from "../lib/chopColors";
+import {
+  applyChopStackSlot,
+  computeChopStackLayout,
+} from "../lib/chopOverlapLayout";
 import type { Chop } from "../lib/types";
 import { formatTimePrecise } from "../lib/timeFormat";
+import type { Theme } from "../lib/theme";
+import { getThemeColors } from "../lib/theme";
 import { audioBufferToWav } from "../lib/audioBufferToWav";
 
 const REGION_TIME_START = "region-time-start";
 const REGION_TIME_END = "region-time-end";
+type PlaybackDirection = "forward" | "reverse";
 
-const REGION_TIME_LABEL_STYLE: Partial<CSSStyleDeclaration> = {
-  flexShrink: "0",
-  fontFamily: "inherit",
-  fontSize: "10px",
-  lineHeight: "1",
-  background: "#fff",
-  color: "#000",
-  border: "1px solid #000",
-  padding: "1px 3px",
-};
+function regionTimeLabelStyle(): Partial<CSSStyleDeclaration> {
+  const { fg, bg } = getThemeColors();
+  return {
+    flexShrink: "0",
+    fontFamily: "inherit",
+    fontSize: "10px",
+    lineHeight: "1",
+    background: bg,
+    color: fg,
+    border: `1px solid ${fg}`,
+    padding: "1px 3px",
+  };
+}
 
 function createRegionTimeContent(start: number, end: number): HTMLElement {
   const root = document.createElement("div");
@@ -41,7 +51,7 @@ function createRegionTimeContent(start: number, end: number): HTMLElement {
 
   const startEl = document.createElement("span");
   startEl.className = `region-time-label ${REGION_TIME_START}`;
-  Object.assign(startEl.style, REGION_TIME_LABEL_STYLE);
+  Object.assign(startEl.style, regionTimeLabelStyle());
   startEl.textContent = formatTimePrecise(start);
 
   const gapEl = document.createElement("span");
@@ -51,7 +61,7 @@ function createRegionTimeContent(start: number, end: number): HTMLElement {
 
   const endEl = document.createElement("span");
   endEl.className = `region-time-label ${REGION_TIME_END}`;
-  Object.assign(endEl.style, REGION_TIME_LABEL_STYLE);
+  Object.assign(endEl.style, regionTimeLabelStyle());
   endEl.textContent = formatTimePrecise(end);
 
   root.append(startEl, gapEl, endEl);
@@ -60,7 +70,9 @@ function createRegionTimeContent(start: number, end: number): HTMLElement {
 
 function createPlaybackCursor(): HTMLDivElement {
   const line = document.createElement("div");
+  const head = document.createElement("span");
   line.className = "playback-cursor";
+  head.className = "playback-cursor-head";
   line.setAttribute("part", "playback-cursor");
   Object.assign(line.style, {
     position: "absolute",
@@ -69,9 +81,46 @@ function createPlaybackCursor(): HTMLDivElement {
     top: "0",
     height: "100%",
     pointerEvents: "none",
+    // Inline border: WaveSurfer v7 renders inside shadow DOM, so global CSS won't apply.
+    borderLeft: "2px solid var(--accent-color, #000)",
     opacity: "0",
   });
+  Object.assign(head.style, {
+    position: "absolute",
+    top: "0",
+    left: "0",
+    width: "0",
+    height: "0",
+    borderTop: "5px solid transparent",
+    borderBottom: "5px solid transparent",
+    borderLeft: "7px solid var(--accent-color, #000)",
+    transform: "translate(1px, -1px)",
+  });
+  line.append(head);
   return line;
+}
+
+function setPlaybackCursorDirection(
+  line: HTMLElement,
+  direction: PlaybackDirection,
+): void {
+  const head = line.firstElementChild as HTMLElement | null;
+  if (!head) return;
+
+  if (direction === "reverse") {
+    head.style.left = "auto";
+    head.style.right = "0";
+    head.style.borderLeft = "0";
+    head.style.borderRight = "7px solid var(--accent-color, #000)";
+    head.style.transform = "translate(-1px, -1px)";
+    return;
+  }
+
+  head.style.left = "0";
+  head.style.right = "auto";
+  head.style.borderLeft = "7px solid var(--accent-color, #000)";
+  head.style.borderRight = "0";
+  head.style.transform = "translate(1px, -1px)";
 }
 
 function updateRegionTimeLabels(region: Region): void {
@@ -90,16 +139,19 @@ type Props = {
   buffer: AudioBuffer;
   chops: Chop[];
   paletteMode: PaletteMode;
+  theme: Theme;
   onChopsChange: (chops: Chop[]) => void;
   seekTime: number;
   onSeek: (time: number) => void;
   getPlaybackTime: () => number | null;
+  getPlaybackDirection: () => PlaybackDirection | null;
 };
 
 function positionPlaybackLine(
   ws: WaveSurfer,
   line: HTMLElement,
   time: number,
+  direction: PlaybackDirection,
 ): void {
   const duration = ws.getDuration();
   if (duration <= 0) return;
@@ -107,6 +159,7 @@ function positionPlaybackLine(
   const width = wrapper.scrollWidth || wrapper.clientWidth;
   if (width <= 0) return;
   const x = Math.min(width - 1, (time / duration) * width);
+  setPlaybackCursorDirection(line, direction);
   line.style.transform = `translateX(${x}px)`;
   line.style.opacity = "1";
 }
@@ -114,6 +167,44 @@ function positionPlaybackLine(
 function hidePlaybackLine(line: HTMLElement): void {
   line.style.opacity = "0";
   line.style.transform = "";
+}
+
+function chopsWithLiveRegionBounds(
+  chops: Chop[],
+  regions: Region[],
+): Pick<Chop, "id" | "start" | "end">[] {
+  const regionById = new Map(regions.map((region) => [region.id, region]));
+  return chops.map((chop) => {
+    const region = regionById.get(chop.id);
+    return region
+      ? { id: chop.id, start: region.start, end: region.end }
+      : { id: chop.id, start: chop.start, end: chop.end };
+  });
+}
+
+function applyChopStackLayout(
+  chops: Chop[],
+  regions: Region[],
+): void {
+  const chopIds = new Set(chops.map((chop) => chop.id));
+  const intervals = chopsWithLiveRegionBounds(chops, regions);
+  for (const region of regions) {
+    if (!chopIds.has(region.id)) {
+      intervals.push({
+        id: region.id,
+        start: region.start,
+        end: region.end,
+      });
+    }
+  }
+
+  const layout = computeChopStackLayout(intervals);
+  for (const region of regions) {
+    const slot = layout.get(region.id);
+    if (slot && region.element) {
+      applyChopStackSlot(region.element, slot);
+    }
+  }
 }
 
 /** Pixels/sec when the waveform fits the container — also the minimum zoom level. */
@@ -153,16 +244,19 @@ export function WaveformEditor({
   buffer,
   chops,
   paletteMode,
+  theme,
   onChopsChange,
   seekTime,
   onSeek,
   getPlaybackTime,
+  getPlaybackDirection,
 }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const wavesurferRef = useRef<WaveSurfer | null>(null);
   const regionsRef = useRef<RegionsPlugin | null>(null);
   const playbackLineRef = useRef<HTMLDivElement | null>(null);
   const getPlaybackTimeRef = useRef(getPlaybackTime);
+  const getPlaybackDirectionRef = useRef(getPlaybackDirection);
   const seekTimeRef = useRef(seekTime);
   const onSeekRef = useRef(onSeek);
   const onChopsChangeRef = useRef(onChopsChange);
@@ -171,6 +265,7 @@ export function WaveformEditor({
   // Prevents region-created handler from echoing back into React state during sync.
   const syncingRef = useRef(false);
   getPlaybackTimeRef.current = getPlaybackTime;
+  getPlaybackDirectionRef.current = getPlaybackDirection;
   seekTimeRef.current = seekTime;
   onSeekRef.current = onSeek;
   onChopsChangeRef.current = onChopsChange;
@@ -197,20 +292,22 @@ export function WaveformEditor({
       deltaThreshold: 0,
     });
 
+    const { fg, bg } = getThemeColors();
+
     const hover = HoverPlugin.create({
-      lineColor: "#000",
+      lineColor: fg,
       lineWidth: 1,
-      labelColor: "#000",
-      labelBackground: "#fff",
+      labelColor: fg,
+      labelBackground: bg,
       labelSize: 8,
       formatTimeCallback: formatTimePrecise,
     });
 
     const ws = WaveSurfer.create({
       container,
-      waveColor: "#000",
-      progressColor: "#000",
-      cursorColor: "#000",
+      waveColor: fg,
+      progressColor: fg,
+      cursorColor: fg,
       height: 120,
       normalize: true,
       plugins: [regions, zoom, hover],
@@ -242,7 +339,8 @@ export function WaveformEditor({
       const playingTime = getPlaybackTimeRef.current();
       const time = playingTime ?? seekTimeRef.current;
       if (time !== null && ws.getDuration() > 0) {
-        positionPlaybackLine(ws, playbackLine, time);
+        const direction = getPlaybackDirectionRef.current() ?? "forward";
+        positionPlaybackLine(ws, playbackLine, time, direction);
       } else {
         hidePlaybackLine(playbackLine);
       }
@@ -257,6 +355,7 @@ export function WaveformEditor({
 
     const onRegionCreated = (region: Region) => {
       updateRegionTimeLabels(region);
+      applyChopStackLayout(chopsRef.current, regions.getRegions());
       if (syncingRef.current) return;
       const color = getColorForIndex(
         paletteModeRef.current,
@@ -273,16 +372,19 @@ export function WaveformEditor({
           color,
           volume: 1,
           timeStretch: 1,
+          reverse: false,
         },
       ]);
     };
 
     const onRegionUpdate = (region: Region) => {
       updateRegionTimeLabels(region);
+      applyChopStackLayout(chopsRef.current, regions.getRegions());
     };
 
     const onRegionUpdated = (region: Region) => {
       updateRegionTimeLabels(region);
+      applyChopStackLayout(chopsRef.current, regions.getRegions());
       if (syncingRef.current) return;
       onChopsChangeRef.current(
         chopsRef.current.map((c) =>
@@ -322,7 +424,8 @@ export function WaveformEditor({
     const onLayoutChange = () => {
       const time = getPlaybackTimeRef.current() ?? seekTimeRef.current;
       if (time !== null && ws.getDuration() > 0) {
-        positionPlaybackLine(ws, playbackLine, time);
+        const direction = getPlaybackDirectionRef.current() ?? "forward";
+        positionPlaybackLine(ws, playbackLine, time, direction);
       }
     };
 
@@ -347,7 +450,7 @@ export function WaveformEditor({
       wavesurferRef.current = null;
       regionsRef.current = null;
     };
-  }, [buffer]);
+  }, [buffer, theme]);
 
   useEffect(() => {
     const regions = regionsRef.current;
@@ -405,6 +508,8 @@ export function WaveformEditor({
             });
           }
         }
+
+        applyChopStackLayout(chops, regionsPlugin.getRegions());
       } finally {
         syncingRef.current = false;
       }

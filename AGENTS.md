@@ -19,3 +19,4 @@ MPC is a browser-based audio sampler. Services and standard commands are documen
 - Core sampler features do NOT require the API or those binaries. To test the product end-to-end without YouTube, just run the web app and upload a local audio file.
 - App state persists in the browser (`localStorage` session meta + per-track audio in IndexedDB). To start from a clean slate, use SETTINGS → clear saved data in the UI.
 - Chops are created by click-dragging a region on the black waveform; bind a chop to a pad by selecting its row in the chop table and pressing a letter key.
+- Offline media: `npm run download` / `npm run download:audio` (see `scripts/download.sh`) saves files to `offline/` via yt-dlp; that folder is gitignored except `urls.example.txt`.

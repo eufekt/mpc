@@ -20,6 +20,7 @@ import {
   type SelectedChop,
 } from "./hooks/useSamplerKeyboard";
 import { useSessionPersistence } from "./hooks/useSessionPersistence";
+import { useTheme } from "./hooks/useTheme";
 import { useProjects } from "./hooks/useProjects";
 import { createTrack, createArrangementLane, useSessionState } from "./hooks/useSessionState";
 import { filterLoadedTracks } from "./lib/arrangement";
@@ -40,6 +41,7 @@ import { deleteTrackAudio } from "./lib/sessionPersistence";
 import type { TransportFocus } from "./lib/transport";
 
 export default function App() {
+  const { theme, setTheme } = useTheme();
   const engine = useAudioEngine();
   const {
     projects,
@@ -67,6 +69,7 @@ export default function App() {
     setPadMode,
     setVolume,
     setAccentColor,
+    setMasterEffects,
     restoreSession,
     resetSession,
     addLane,
@@ -82,6 +85,7 @@ export default function App() {
     setLaneMute,
     setLaneVolume,
     setLaneRowHeight,
+    setLoopRegion,
   } = useSessionState();
 
   const [selectedChop, setSelectedChop] = useState<SelectedChop | null>(null);
@@ -105,6 +109,7 @@ export default function App() {
   const arrangementPlayer = useArrangementPlayer({
     lanes: session.arrangement.lanes,
     tracks: session.tracks,
+    loopRegion: session.arrangement.loopRegion,
     getBuffer: (trackId) => engine.getBuffer(trackId) ?? undefined,
     getContext: engine.getContext,
     getMasterGain: engine.getMasterGain,
@@ -245,6 +250,7 @@ export default function App() {
       session,
       restoreSession,
       setVolume,
+      setMasterEffects,
       onStatus: setStatus,
       onProjectsIndexChange: refreshIndex,
     });
@@ -262,6 +268,14 @@ export default function App() {
   const handlePaletteChange = (mode: PaletteMode) => {
     setPaletteMode(mode);
   };
+
+  const handleMasterEffectsChange = useCallback(
+    (masterEffects: typeof session.masterEffects) => {
+      setMasterEffects(masterEffects);
+      engine.setMasterEffects(masterEffects);
+    },
+    [engine, setMasterEffects],
+  );
 
   const toggleView = (view: keyof typeof viewVisibility) => {
     setViewVisibility((prev) => ({ ...prev, [view]: !prev[view] }));
@@ -476,6 +490,13 @@ export default function App() {
     [updateChop],
   );
 
+  const handleChopReverseChange = useCallback(
+    (trackId: string, chopId: string, reverse: boolean) => {
+      updateChop(trackId, chopId, { reverse });
+    },
+    [updateChop],
+  );
+
   const handleChopNameChange = useCallback(
     (trackId: string, chopId: string, name: string) => {
       updateChop(trackId, chopId, { name });
@@ -490,6 +511,7 @@ export default function App() {
       toggleTrackPlayback: engine.toggleTrackPlayback,
       setSeekTime: engine.setSeekTime,
       getPlaybackTime: engine.getPlaybackTime,
+      getPlaybackDirection: engine.getPlaybackDirection,
       resume: engine.resume,
     }),
     [
@@ -498,6 +520,7 @@ export default function App() {
       engine.toggleTrackPlayback,
       engine.setSeekTime,
       engine.getPlaybackTime,
+      engine.getPlaybackDirection,
       engine.resume,
     ],
   );
@@ -731,10 +754,14 @@ export default function App() {
           )}
           {settingsPanelOpen && (
             <SettingsPanel
+              theme={theme}
+              onThemeChange={setTheme}
               accentColor={session.accentColor}
               onAccentColorChange={setAccentColor}
               paletteMode={session.paletteMode}
               onPaletteModeChange={handlePaletteChange}
+              masterEffects={session.masterEffects}
+              onMasterEffectsChange={handleMasterEffectsChange}
               projectName={activeProject?.name ?? "Untitled"}
               onClearSavedData={() => void handleClearSavedData()}
             />
@@ -782,6 +809,7 @@ export default function App() {
                     index={index}
                     buffer={buffer}
                     paletteMode={session.paletteMode}
+                    theme={theme}
                     transport={trackTransport}
                     transportVersion={engine.transportVersion}
                     isActive={track.id === activeTrackId}
@@ -798,6 +826,7 @@ export default function App() {
                     onChopNameChange={handleChopNameChange}
                     onChopVolumeChange={handleChopVolumeChange}
                     onChopTimeStretchChange={handleChopTimeStretchChange}
+                    onChopReverseChange={handleChopReverseChange}
                     onRemoveTrack={handleRemoveTrack}
                     onRenameTrack={handleRenameTrack}
                     transportFocused={
@@ -821,12 +850,14 @@ export default function App() {
               isPlaying={arrangementPlayer.isPlaying}
               playheadTime={playheadTime}
               loop={arrangementPlayer.loop}
+              loopRegion={session.arrangement.loopRegion}
               transportFocused={transportFocus.type === "arrangement"}
               onFocusTransport={focusArrangementTransport}
               onTogglePlay={() => void toggleArrangementPlayback()}
               onStop={stopArrangement}
               onSeek={arrangementPlayer.setSeekTime}
               onLoopChange={arrangementPlayer.setLoop}
+              onLoopRegionChange={setLoopRegion}
               onAddLane={(draft) => {
                 addLane({
                   ...createArrangementLane(draft.name),

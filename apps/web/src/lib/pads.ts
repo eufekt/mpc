@@ -49,6 +49,7 @@ export function toChopPlayRequests(bound: BoundChop[]): ChopPlayRequest[] {
     key: b.chop.key!,
     volume: b.chop.volume,
     timeStretch: b.chop.timeStretch,
+    reverse: b.chop.reverse,
   }));
 }
 

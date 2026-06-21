@@ -2,6 +2,7 @@ import { memo, useCallback } from "react";
 import { ChopTable } from "./ChopTable";
 import { WaveformEditor } from "./WaveformEditor";
 import type { PaletteMode } from "../lib/chopColors";
+import type { Theme } from "../lib/theme";
 import type { Chop, Track } from "../lib/types";
 import { formatTimePrecise } from "../lib/timeFormat";
 
@@ -11,6 +12,7 @@ type TransportApi = {
   toggleTrackPlayback: (trackId: string) => Promise<void>;
   setSeekTime: (trackId: string, time: number) => void;
   getPlaybackTime: (trackId: string) => number | null;
+  getPlaybackDirection: (trackId: string) => "forward" | "reverse" | null;
   resume: () => Promise<void>;
 };
 
@@ -19,6 +21,7 @@ type Props = {
   index: number;
   buffer: AudioBuffer;
   paletteMode: PaletteMode;
+  theme: Theme;
   transport: TransportApi;
   transportVersion: number;
   isActive: boolean;
@@ -35,6 +38,7 @@ type Props = {
     chopId: string,
     timeStretch: number,
   ) => void;
+  onChopReverseChange: (trackId: string, chopId: string, reverse: boolean) => void;
   onRemoveTrack: (trackId: string) => void;
   onRenameTrack: (trackId: string, name: string) => void;
   transportFocused: boolean;
@@ -46,6 +50,7 @@ export const TrackPanel = memo(function TrackPanel({
   index,
   buffer,
   paletteMode,
+  theme,
   transport,
   transportVersion,
   isActive,
@@ -58,6 +63,7 @@ export const TrackPanel = memo(function TrackPanel({
   onChopNameChange,
   onChopVolumeChange,
   onChopTimeStretchChange,
+  onChopReverseChange,
   onRemoveTrack,
   onRenameTrack,
   transportFocused,
@@ -83,6 +89,10 @@ export const TrackPanel = memo(function TrackPanel({
 
   const getPlaybackTime = useCallback(
     () => transport.getPlaybackTime(track.id),
+    [transport, track.id],
+  );
+  const getPlaybackDirection = useCallback(
+    () => transport.getPlaybackDirection(track.id),
     [transport, track.id],
   );
 
@@ -125,6 +135,13 @@ export const TrackPanel = memo(function TrackPanel({
       onChopTimeStretchChange(track.id, chopId, timeStretch);
     },
     [onChopTimeStretchChange, track.id],
+  );
+
+  const handleTableReverseChange = useCallback(
+    (chopId: string, reverse: boolean) => {
+      onChopReverseChange(track.id, chopId, reverse);
+    },
+    [onChopReverseChange, track.id],
   );
 
   return (
@@ -187,10 +204,12 @@ export const TrackPanel = memo(function TrackPanel({
           buffer={buffer}
           chops={track.chops}
           paletteMode={paletteMode}
+          theme={theme}
           onChopsChange={onChopsChange}
           seekTime={seekTime}
           onSeek={onSeek}
           getPlaybackTime={getPlaybackTime}
+          getPlaybackDirection={getPlaybackDirection}
         />
 
         <ChopTable
@@ -202,6 +221,7 @@ export const TrackPanel = memo(function TrackPanel({
           onNameChange={handleTableNameChange}
           onVolumeChange={handleTableVolumeChange}
           onTimeStretchChange={handleTableTimeStretchChange}
+          onReverseChange={handleTableReverseChange}
           onColorChange={handleTableColorChange}
         />
       </div>

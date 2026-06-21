@@ -10,7 +10,9 @@
     "build:cloudflare": "npm run build -w @mpc/web",
     "deploy:cloudflare": "npm run build:cloudflare && wrangler deploy",
     "cf:types": "wrangler types",
-    "typecheck": "npm run typecheck -w @mpc/web && npm run typecheck -w @mpc/api && tsc -p worker/tsconfig.json --noEmit"
+    "typecheck": "npm run typecheck -w @mpc/web && npm run typecheck -w @mpc/api && tsc -p worker/tsconfig.json --noEmit",
+    "download": "bash scripts/download.sh",
+    "download:audio": "bash scripts/download.sh --audio"
   },
   "devDependencies": {
     "@cloudflare/containers": "^0.3.7",

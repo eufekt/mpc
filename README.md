@@ -22,6 +22,22 @@ npm run dev
 
 Requires `yt-dlp` on PATH for YouTube imports.
 
+## Offline downloads
+
+Download videos or audio into `offline/` for local use (not committed to git).
+
+```bash
+brew install yt-dlp ffmpeg   # once
+
+npm run download -- "https://www.youtube.com/watch?v=..."
+npm run download:audio -- "https://www.youtube.com/watch?v=..."   # WAV for MPC
+
+# batch from a URL list
+npm run download -- --batch offline/urls.txt
+```
+
+Files are named `Title [videoId].mp4` (or `.wav` with `download:audio`). Load them in MPC via **LOAD TRACK** → file upload.
+
 ## Deploy (Vercel)
 
 Set the Vercel project **root directory** to the repository root. [`vercel.json`](vercel.json) builds `apps/web` and outputs `apps/web/dist`.

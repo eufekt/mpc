@@ -9,6 +9,7 @@ import {
 import type {
   ArrangementClip,
   ArrangementLane,
+  ArrangementLoopRegion,
   Chop,
   PadMode,
   SavedSessionMetaV1,
@@ -21,8 +22,15 @@ import { createTrackId } from "./trackIds";
 import { deriveDefaultTrackName } from "./trackNames";
 import { DEFAULT_ACCENT_COLOR } from "./transport";
 import {
+  DEFAULT_MASTER_EFFECTS,
+  normalizeMasterEffects,
+  type MasterEffects,
+} from "./masterEffects";
+import {
   clampLaneRowHeight,
+  computeArrangementDuration,
   DEFAULT_LANE_ROW_HEIGHT,
+  normalizeLoopRegion,
 } from "./arrangement";
 
 const DB_NAME = "mpc";
@@ -53,10 +61,26 @@ type RawSessionMeta = Partial<SessionState | SavedSessionMetaV1 | SavedSessionMe
   arrangement?: {
     lanes?: Partial<ArrangementLane>[];
     laneRowHeight?: number;
+    loopRegion?: Partial<ArrangementLoopRegion>;
   };
   activeTrackId?: string | null;
   accentColor?: string;
+  masterEffects?: Partial<MasterEffects>;
 };
+
+function demigratePadKey(key: string | null | undefined): string | null {
+  if (!key) return null;
+  const lower = key.toLowerCase();
+  const match = lower.match(/^([a-h])(0[1-9]|1[0-6])$/);
+  if (!match) return lower;
+  const bankIndex = match[1].charCodeAt(0) - "a".charCodeAt(0);
+  const padIndex = Number(match[2]);
+  const offset = bankIndex * 16 + padIndex - 1;
+  if (offset >= 0 && offset < 26) {
+    return String.fromCharCode("a".charCodeAt(0) + offset);
+  }
+  return lower;
+}
 
 function normalizeSavedChops(
   chops: Partial<Chop>[],
@@ -71,7 +95,7 @@ function normalizeSavedChops(
       id: chop.id ?? `chop-${index}`,
       start: chop.start ?? 0,
       end: chop.end ?? 0,
-      key: chop.key ?? null,
+      key: demigratePadKey(chop.key ?? null),
       ...(name ? { name } : {}),
       color: chop.color ?? getColorForIndex(paletteMode, index),
       volume: typeof chop.volume === "number" ? chop.volume : 1,
@@ -79,6 +103,7 @@ function normalizeSavedChops(
         typeof chop.timeStretch === "number"
           ? normalizeTimeStretch(chop.timeStretch)
           : 1,
+      reverse: chop.reverse === true,
     };
   });
 }
@@ -93,6 +118,7 @@ function migrateV2ToV3(v2: SavedSessionMetaV2): SessionState {
     version: 3,
     arrangement: emptyArrangement(),
     accentColor: DEFAULT_ACCENT_COLOR,
+    masterEffects: DEFAULT_MASTER_EFFECTS,
   };
 }
 
@@ -122,6 +148,23 @@ function migrateV1ToV2(v1: SavedSessionMetaV1): SavedSessionMetaV2 {
     padMode: v1.padMode,
     volume: v1.volume,
   };
+}
+
+function normalizeLoopRegionField(
+  loopRegion: Partial<ArrangementLoopRegion> | undefined,
+  arrangementDuration: number,
+): ArrangementLoopRegion | undefined {
+  if (
+    !loopRegion ||
+    typeof loopRegion.start !== "number" ||
+    typeof loopRegion.end !== "number"
+  ) {
+    return undefined;
+  }
+  return normalizeLoopRegion(
+    { start: loopRegion.start, end: loopRegion.end },
+    arrangementDuration,
+  );
 }
 
 function normalizeArrangementClip(
@@ -262,15 +305,22 @@ function parseV3(parsed: RawSessionMeta): SessionState | null {
   const tracks = parseTracks(parsed, paletteMode);
   if (!tracks) return null;
 
+  const lanes = normalizeArrangementLanes(parsed.arrangement?.lanes);
+  const arrangementDuration = computeArrangementDuration(lanes, tracks);
+
   return {
     version: 3,
     tracks,
     arrangement: {
-      lanes: normalizeArrangementLanes(parsed.arrangement?.lanes),
+      lanes,
       laneRowHeight: clampLaneRowHeight(
         typeof parsed.arrangement?.laneRowHeight === "number"
           ? parsed.arrangement.laneRowHeight
           : DEFAULT_LANE_ROW_HEIGHT,
+      ),
+      loopRegion: normalizeLoopRegionField(
+        parsed.arrangement?.loopRegion,
+        arrangementDuration,
       ),
     },
     activeTrackId: resolveActiveTrackId(parsed, tracks),
@@ -278,6 +328,7 @@ function parseV3(parsed: RawSessionMeta): SessionState | null {
     padMode,
     volume,
     accentColor,
+    masterEffects: normalizeMasterEffects(parsed.masterEffects),
   };
 }
 

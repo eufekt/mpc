@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef } from "react";
 import { DEFAULT_LANE_ROW_HEIGHT } from "../lib/arrangement";
+import { DEFAULT_MASTER_EFFECTS } from "../lib/masterEffects";
 import { loadProjectsIndex, touchProject } from "../lib/projectPersistence";
 import {
   clearProject,
@@ -25,9 +26,58 @@ type Params = {
   session: SessionState;
   restoreSession: SessionApi["restoreSession"];
   setVolume: SessionApi["setVolume"];
+  setMasterEffects: SessionApi["setMasterEffects"];
   onStatus: (message: string | null) => void;
   onProjectsIndexChange?: () => void;
 };
+
+const LEGACY_AUDIO_MIGRATED_KEY = "mpc-legacy-audio-migrated";
+
+async function maybeMigrateLegacyAudio(
+  projectId: string,
+  trackIds: string[],
+): Promise<void> {
+  if (localStorage.getItem(LEGACY_AUDIO_MIGRATED_KEY)) return;
+  await migrateLegacyAudioForProject(projectId, trackIds);
+  localStorage.setItem(LEGACY_AUDIO_MIGRATED_KEY, "1");
+}
+
+async function loadCachedTrackAudio(
+  projectId: string,
+  track: SessionState["tracks"][number],
+  engine: Engine,
+  isFirstTrack: boolean,
+): Promise<boolean> {
+  let blob = await loadTrackBlob(projectId, track.id);
+
+  if (!blob && isFirstTrack) {
+    const legacyBlob = await loadLegacyAudioBlob();
+    if (legacyBlob) {
+      blob = legacyBlob;
+      await migrateLegacyBlobToTrack(projectId, track.id);
+    }
+  }
+
+  if (!blob) return false;
+
+  const arrayBuffer = await blob.arrayBuffer();
+  await engine.loadTrackAudio(track.id, arrayBuffer, track.sourceName);
+  return true;
+}
+
+function emptySession(): SessionState {
+  return {
+    version: 3,
+    tracks: [],
+    arrangement: { lanes: [], laneRowHeight: DEFAULT_LANE_ROW_HEIGHT },
+    activeTrackId: null,
+    paletteMode: "pastel",
+    padMode: "layer",
+    volume: 1,
+    accentColor: DEFAULT_ACCENT_COLOR,
+    masterEffects: DEFAULT_MASTER_EFFECTS,
+  };
+}
 
 export function useSessionPersistence({
   projectId,
@@ -35,6 +85,7 @@ export function useSessionPersistence({
   session,
   restoreSession,
   setVolume,
+  setMasterEffects,
   onStatus,
   onProjectsIndexChange,
 }: Params) {
@@ -42,7 +93,11 @@ export function useSessionPersistence({
   const suppressRestoreRef = useRef(false);
   const restoreAbortRef = useRef<AbortController | null>(null);
   const sessionRef = useRef(session);
+  const engineRef = useRef(engine);
+  const onStatusRef = useRef(onStatus);
   sessionRef.current = session;
+  engineRef.current = engine;
+  onStatusRef.current = onStatus;
 
   const cancelPendingRestore = useCallback(() => {
     suppressRestoreRef.current = true;
@@ -53,6 +108,7 @@ export function useSessionPersistence({
   const clearPersistedSession = useCallback(async () => {
     cancelPendingRestore();
     await clearProject(projectId);
+    saveSessionState(projectId, emptySession());
     onProjectsIndexChange?.();
   }, [cancelPendingRestore, onProjectsIndexChange, projectId]);
 
@@ -63,14 +119,17 @@ export function useSessionPersistence({
   }, [onProjectsIndexChange, projectId]);
 
   useEffect(() => {
+    if (!projectId) return;
+
     suppressRestoreRef.current = false;
     const abort = new AbortController();
     restoreAbortRef.current = abort;
     let statusTimer: number | undefined;
+    const engine = engineRef.current;
 
     const clearStatusLater = () => {
       statusTimer = window.setTimeout(() => {
-        if (!abort.signal.aborted) onStatus(null);
+        if (!abort.signal.aborted) onStatusRef.current(null);
       }, 2000);
     };
 
@@ -87,24 +146,27 @@ export function useSessionPersistence({
 
       const saved = loadSessionState(projectId);
       if (!saved) {
-        restoreSession({
-          version: 3,
-          tracks: [],
-          arrangement: { lanes: [], laneRowHeight: DEFAULT_LANE_ROW_HEIGHT },
-          activeTrackId: null,
-          paletteMode: "pastel",
-          padMode: "layer",
-          volume: 1,
-          accentColor: DEFAULT_ACCENT_COLOR,
-        });
+        restoreSession(emptySession());
+        return;
+      }
+
+      restoreSession(saved);
+      setVolume(saved.volume);
+      engine.setVolume(saved.volume);
+      setMasterEffects(saved.masterEffects);
+      engine.setMasterEffects(saved.masterEffects);
+
+      if (saved.tracks.length === 0) {
         return;
       }
 
       isRestoringRef.current = true;
-      onStatus("restoring project...");
+      onStatusRef.current("restoring project...");
 
       try {
-        await migrateLegacyAudioForProject(
+        if (abort.signal.aborted || suppressRestoreRef.current) return;
+
+        await maybeMigrateLegacyAudio(
           projectId,
           saved.tracks.map((track) => track.id),
         );
@@ -112,66 +174,45 @@ export function useSessionPersistence({
         await engine.resume();
         if (abort.signal.aborted || suppressRestoreRef.current) return;
 
-        const legacyBlob = await loadLegacyAudioBlob();
-        const migratedFromV1 = legacyBlob !== null;
-
-        for (const track of saved.tracks) {
-          if (abort.signal.aborted || suppressRestoreRef.current) return;
-
-          let blob = await loadTrackBlob(projectId, track.id);
-
-          if (!blob && migratedFromV1 && track.id === saved.tracks[0]?.id) {
-            blob = legacyBlob;
-            await migrateLegacyBlobToTrack(projectId, track.id);
-          }
-
-          if (
-            !blob &&
-            track.sourceType === "youtube" &&
-            track.sourceUrl
-          ) {
-            blob = await engine.loadYouTubeUrl(track.id, track.sourceUrl);
-            if (abort.signal.aborted || suppressRestoreRef.current) return;
-            await saveTrackAudio(projectId, track.id, blob);
-            continue;
-          }
-
-          if (blob) {
-            const arrayBuffer = await blob.arrayBuffer();
-            if (abort.signal.aborted || suppressRestoreRef.current) return;
-            await engine.loadTrackAudio(
-              track.id,
-              arrayBuffer,
-              track.sourceName,
+        const loadResults = await Promise.all(
+          saved.tracks.map((track, index) => {
+            if (abort.signal.aborted || suppressRestoreRef.current) {
+              return Promise.resolve(false);
+            }
+            return loadCachedTrackAudio(
+              projectId,
+              track,
+              engine,
+              index === 0,
             );
-          }
-        }
+          }),
+        );
 
         if (abort.signal.aborted || suppressRestoreRef.current) return;
 
-        if (saved.tracks.length > 0) {
-          const anyLoaded = saved.tracks.some((t) => engine.hasTrack(t.id));
-          if (!anyLoaded) {
-            onStatus("restore failed: audio missing — reload your file or url");
-            clearStatusLater();
-            return;
-          }
+        const anyLoaded =
+          saved.tracks.length === 0 || loadResults.some(Boolean);
+        if (anyLoaded) {
+          onStatusRef.current("project restored");
+        } else if (saved.tracks.some((track) => track.sourceType === "youtube")) {
+          onStatusRef.current(
+            "audio missing — reload youtube tracks via LOAD TRACK",
+          );
+        } else {
+          onStatusRef.current(
+            "audio missing — reload your file or url",
+          );
         }
-
-        restoreSession(saved);
-        setVolume(saved.volume);
-        engine.setVolume(saved.volume);
-        onStatus("project restored");
         clearStatusLater();
       } catch (e) {
         if (abort.signal.aborted || suppressRestoreRef.current) return;
         const message = e instanceof Error ? e.message : "unknown error";
-        onStatus(`restore failed: ${message}`);
+        onStatusRef.current(`restore failed: ${message}`);
         clearStatusLater();
       } finally {
         isRestoringRef.current = false;
         if (abort.signal.aborted || suppressRestoreRef.current) {
-          if (saved) unloadRestoredTracks(saved);
+          unloadRestoredTracks(saved);
         }
       }
     })();
@@ -183,7 +224,9 @@ export function useSessionPersistence({
         window.clearTimeout(statusTimer);
       }
     };
-  }, [engine, onStatus, projectId, restoreSession, setVolume]);
+    // Only re-restore when switching projects — not on every engine render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [projectId]);
 
   const sessionSaveKey = useMemo(
     () =>
@@ -195,6 +238,7 @@ export function useSessionPersistence({
         padMode: session.padMode,
         volume: session.volume,
         accentColor: session.accentColor,
+        masterEffects: session.masterEffects,
         activeTrackId: session.activeTrackId,
       }),
     [
@@ -205,15 +249,13 @@ export function useSessionPersistence({
       session.padMode,
       session.volume,
       session.accentColor,
+      session.masterEffects,
       session.activeTrackId,
     ],
   );
 
   useEffect(() => {
     if (isRestoringRef.current) return;
-
-    const hasLoadedTracks = session.tracks.some((t) => engine.hasTrack(t.id));
-    if (session.tracks.length > 0 && !hasLoadedTracks) return;
 
     const timer = window.setTimeout(() => {
       saveSessionState(projectId, sessionRef.current);

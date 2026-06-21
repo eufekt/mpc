@@ -16,6 +16,7 @@ import type {
   ArrangementLane,
   ArrangementClipStackMode,
   ArrangementLaneMode,
+  ArrangementLoopRegion,
   Chop,
   PadMode,
   SessionState,
@@ -23,6 +24,7 @@ import type {
 } from "../lib/types";
 import { createTrackId } from "../lib/trackIds";
 import { DEFAULT_ACCENT_COLOR } from "../lib/transport";
+import { DEFAULT_MASTER_EFFECTS, type MasterEffects } from "../lib/masterEffects";
 
 export function createTrack(
   params: Pick<Track, "sourceType" | "sourceName" | "name"> & {
@@ -65,6 +67,7 @@ function createInitialState(): SessionState {
     padMode: "layer",
     volume: 1,
     accentColor: DEFAULT_ACCENT_COLOR,
+    masterEffects: DEFAULT_MASTER_EFFECTS,
   };
 }
 
@@ -83,6 +86,7 @@ type SessionAction =
   | { type: "setPadMode"; mode: PadMode }
   | { type: "setVolume"; volume: number }
   | { type: "setAccentColor"; accentColor: string }
+  | { type: "setMasterEffects"; masterEffects: MasterEffects }
   | { type: "addLane"; lane: ArrangementLane }
   | { type: "removeLane"; laneId: string }
   | { type: "updateLane"; laneId: string; patch: Partial<ArrangementLane> }
@@ -113,7 +117,8 @@ type SessionAction =
     }
   | { type: "setLaneMute"; laneId: string; mute: boolean }
   | { type: "setLaneVolume"; laneId: string; volume: number }
-  | { type: "setLaneRowHeight"; laneRowHeight: number };
+  | { type: "setLaneRowHeight"; laneRowHeight: number }
+  | { type: "setLoopRegion"; loopRegion: ArrangementLoopRegion | undefined };
 
 function laneBlockerSegments(
   lane: ArrangementLane,
@@ -288,6 +293,8 @@ function sessionReducer(
       return { ...state, volume: action.volume };
     case "setAccentColor":
       return { ...state, accentColor: action.accentColor };
+    case "setMasterEffects":
+      return { ...state, masterEffects: action.masterEffects };
     case "addLane":
       return {
         ...state,
@@ -452,6 +459,14 @@ function sessionReducer(
           laneRowHeight: clampLaneRowHeight(action.laneRowHeight),
         },
       };
+    case "setLoopRegion":
+      return {
+        ...state,
+        arrangement: {
+          ...state.arrangement,
+          loopRegion: action.loopRegion,
+        },
+      };
     default:
       return state;
   }
@@ -532,6 +547,10 @@ export function useSessionState() {
 
   const setAccentColor = useCallback((accentColor: string) => {
     dispatch({ type: "setAccentColor", accentColor });
+  }, []);
+
+  const setMasterEffects = useCallback((masterEffects: MasterEffects) => {
+    dispatch({ type: "setMasterEffects", masterEffects });
   }, []);
 
   const addLane = useCallback((lane?: ArrangementLane) => {
@@ -637,6 +656,10 @@ export function useSessionState() {
     dispatch({ type: "setLaneRowHeight", laneRowHeight });
   }, []);
 
+  const setLoopRegion = useCallback((loopRegion: ArrangementLoopRegion | undefined) => {
+    dispatch({ type: "setLoopRegion", loopRegion });
+  }, []);
+
   const activeTrack =
     session.tracks.find((t) => t.id === session.activeTrackId) ?? null;
 
@@ -657,6 +680,7 @@ export function useSessionState() {
     setPadMode,
     setVolume,
     setAccentColor,
+    setMasterEffects,
     addLane,
     removeLane,
     updateLaneMeta,
@@ -670,5 +694,6 @@ export function useSessionState() {
     setLaneMute,
     setLaneVolume,
     setLaneRowHeight,
+    setLoopRegion,
   };
 }

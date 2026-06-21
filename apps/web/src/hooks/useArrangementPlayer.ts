@@ -5,10 +5,12 @@ import {
   getClipStartTime,
   getFreeClipAudibleSegments,
   resolveLaneClips,
+  resolveLoopBounds,
+  type ArrangementLoopBounds,
   type ResolvedClip,
 } from "../lib/arrangement";
 import { playSlice } from "../lib/sliceAudioBuffer";
-import type { ArrangementLane, Track } from "../lib/types";
+import type { ArrangementLane, ArrangementLoopRegion, Track } from "../lib/types";
 
 const LOOKAHEAD_SECONDS = 0.05;
 /** How many loop passes to pre-schedule on the audio clock (gapless). */
@@ -16,18 +18,37 @@ const LOOP_ITERATIONS_AHEAD = 3;
 /** Re-schedule more loop passes when playhead is within this many seconds of the end. */
 const LOOP_RESCHEDULE_LEAD_SECONDS = 8;
 
+function loopRegionLength(bounds: ArrangementLoopBounds): number {
+  return Math.max(0, bounds.end - bounds.start);
+}
+
 function iterationTimelineOffset(
   iterIndex: number,
-  duration: number,
+  bounds: ArrangementLoopBounds,
   initialStartAt: number,
 ): number {
   if (iterIndex === 0) return 0;
-  return duration - initialStartAt + (iterIndex - 1) * duration;
+  const firstPassLength = Math.max(0, bounds.end - initialStartAt);
+  const loopLength = loopRegionLength(bounds);
+  if (iterIndex === 1) return firstPassLength;
+  return firstPassLength + (iterIndex - 1) * loopLength;
+}
+
+function loopIterationSchedule(
+  iterIndex: number,
+  bounds: ArrangementLoopBounds,
+  initialStartAt: number,
+): { fromTime: number; toTime: number } {
+  if (iterIndex === 0) {
+    return { fromTime: initialStartAt, toTime: bounds.end };
+  }
+  return { fromTime: bounds.start, toTime: bounds.end };
 }
 
 type Params = {
   lanes: ArrangementLane[];
   tracks: Track[];
+  loopRegion: ArrangementLoopRegion | null | undefined;
   getBuffer: (trackId: string) => AudioBuffer | undefined;
   getContext: () => AudioContext;
   getMasterGain: () => GainNode | null;
@@ -43,6 +64,7 @@ type ScheduleParams = {
   laneGains: Map<string, GainNode>;
   baseTime: number;
   fromTime: number;
+  toTime?: number;
   timelineOffset?: number;
 };
 
@@ -75,9 +97,16 @@ function scheduleClipWallSegment(
   if (wallEnd <= wallStart) return null;
 
   const offsetInClip = wallStart - clipStart;
-  const bufferStart = item.chop.start + offsetInClip * item.timeStretch;
-  const bufferEnd =
-    item.chop.start + (wallEnd - clipStart) * item.timeStretch;
+  const offsetEnd = wallEnd - clipStart;
+  let bufferStart: number;
+  let bufferEnd: number;
+  if (item.chop.reverse) {
+    bufferStart = item.chop.end - offsetEnd * item.timeStretch;
+    bufferEnd = item.chop.end - offsetInClip * item.timeStretch;
+  } else {
+    bufferStart = item.chop.start + offsetInClip * item.timeStretch;
+    bufferEnd = item.chop.start + offsetEnd * item.timeStretch;
+  }
 
   if (bufferEnd <= bufferStart) return null;
 
@@ -90,6 +119,7 @@ function scheduleClipWallSegment(
     volume,
     when,
     item.timeStretch,
+    item.chop.reverse,
   );
 }
 
@@ -101,9 +131,11 @@ function scheduleArrangement({
   laneGains,
   baseTime,
   fromTime,
+  toTime,
   timelineOffset = 0,
 }: ScheduleParams): AudioBufferSourceNode[] {
   const sources: AudioBufferSourceNode[] = [];
+  const cappedTo = toTime ?? Number.POSITIVE_INFINITY;
 
   for (const lane of lanes) {
     if (lane.mute) continue;
@@ -117,7 +149,7 @@ function scheduleArrangement({
       const item = resolvedClips[i];
       const clipStart = getClipStartTime(lane, resolvedClips, i);
       const clipEnd = clipStart + item.playbackDuration;
-      if (clipEnd <= fromTime) continue;
+      if (clipEnd <= fromTime || clipStart >= cappedTo) continue;
 
       const buffer = getBuffer(item.track.id);
       if (!buffer) continue;
@@ -129,12 +161,15 @@ function scheduleArrangement({
           : [{ start: clipStart, end: clipEnd }];
 
       for (const segment of segments) {
+        const segEnd = Math.min(segment.end, cappedTo);
+        if (segEnd <= fromTime || segEnd <= segment.start) continue;
+
         const source = scheduleClipWallSegment(
           ctx,
           item,
           clipStart,
           segment.start,
-          segment.end,
+          segEnd,
           laneGain,
           volume,
           baseTime,
@@ -152,18 +187,21 @@ function scheduleArrangement({
 
 function loopPlayheadTime(
   elapsed: number,
-  duration: number,
+  bounds: ArrangementLoopBounds,
   initialStartAt: number,
 ): number {
-  if (duration <= 0) return 0;
-  const firstPassLength = duration - initialStartAt;
+  const loopLength = loopRegionLength(bounds);
+  if (loopLength <= 0) return bounds.start;
+
+  const firstPassLength = Math.max(0, bounds.end - initialStartAt);
   if (elapsed <= firstPassLength) return initialStartAt + elapsed;
-  return (elapsed - firstPassLength) % duration;
+  return bounds.start + ((elapsed - firstPassLength) % loopLength);
 }
 
 export function useArrangementPlayer({
   lanes,
   tracks,
+  loopRegion,
   getBuffer,
   getContext,
   getMasterGain,
@@ -174,6 +212,7 @@ export function useArrangementPlayer({
   const scheduledSourcesRef = useRef<AudioBufferSourceNode[]>([]);
   const baseTimeRef = useRef<number | null>(null);
   const durationRef = useRef(0);
+  const loopBoundsRef = useRef<ArrangementLoopBounds>({ start: 0, end: 0 });
   const loopInitialStartRef = useRef(0);
   const nextLoopIterationRef = useRef(0);
   const loopMaintainerFrameRef = useRef<number | null>(null);
@@ -257,10 +296,15 @@ export function useArrangementPlayer({
       if (baseTime === null) return;
 
       const ctx = getContext();
-      const duration = durationRef.current;
+      const bounds = loopBoundsRef.current;
       const initialStartAt = loopInitialStartRef.current;
 
       for (let i = fromIter; i < toIter; i++) {
+        const { fromTime, toTime } = loopIterationSchedule(
+          i,
+          bounds,
+          initialStartAt,
+        );
         const sources = scheduleArrangement({
           lanes: lanesRef.current,
           tracks: tracksRef.current,
@@ -268,8 +312,9 @@ export function useArrangementPlayer({
           ctx,
           laneGains: laneGainsRef.current,
           baseTime,
-          fromTime: i === 0 ? initialStartAt : 0,
-          timelineOffset: iterationTimelineOffset(i, duration, initialStartAt),
+          fromTime,
+          toTime,
+          timelineOffset: iterationTimelineOffset(i, bounds, initialStartAt),
         });
         scheduledSourcesRef.current.push(...sources);
       }
@@ -288,27 +333,28 @@ export function useArrangementPlayer({
       }
 
       const ctx = getContext();
-      const duration = durationRef.current;
-      if (duration <= 0) {
+      const bounds = loopBoundsRef.current;
+      if (loopRegionLength(bounds) <= 0) {
         loopMaintainerFrameRef.current = window.requestAnimationFrame(tick);
         return;
       }
 
       const elapsed = ctx.currentTime - baseTimeRef.current;
       const initialStartAt = loopInitialStartRef.current;
-      const firstPassLength = duration - initialStartAt;
+      const firstPassLength = Math.max(0, bounds.end - initialStartAt);
+      const loopLength = loopRegionLength(bounds);
       const loopedElapsed = Math.max(0, elapsed - firstPassLength);
       const currentIter =
         elapsed <= firstPassLength
           ? 0
-          : 1 + Math.floor(loopedElapsed / duration);
+          : 1 + Math.floor(loopedElapsed / loopLength);
 
       const scheduledEndTime =
         nextLoopIterationRef.current === 0
           ? 0
           : iterationTimelineOffset(
               nextLoopIterationRef.current,
-              duration,
+              bounds,
               initialStartAt,
             );
 
@@ -354,8 +400,9 @@ export function useArrangementPlayer({
     if (baseTime !== null) {
       const elapsed = ctx.currentTime - baseTime;
       const duration = durationRef.current;
+      const bounds = loopBoundsRef.current;
       const pausedAt = loopRef.current
-        ? loopPlayheadTime(elapsed, duration, loopInitialStartRef.current)
+        ? loopPlayheadTime(elapsed, bounds, loopInitialStartRef.current)
         : loopInitialStartRef.current + elapsed;
       setSeekTimeState(Math.min(pausedAt, duration));
     }
@@ -408,12 +455,18 @@ export function useArrangementPlayer({
       const duration = computeArrangementDuration(lanes, tracks);
       if (duration <= 0) return;
 
+      const bounds = resolveLoopBounds(loopRegion, duration);
+      loopBoundsRef.current = bounds;
+
       let startAt = Math.max(
         0,
         Math.min(fromTime ?? seekTime, duration),
       );
       if (startAt >= duration) {
         startAt = 0;
+      }
+      if (loopRef.current && startAt >= bounds.end) {
+        startAt = bounds.start;
       }
 
       const baseTime = ctx.currentTime + LOOKAHEAD_SECONDS;
@@ -462,6 +515,7 @@ export function useArrangementPlayer({
       stopSources,
       syncLaneGains,
       tracks,
+      loopRegion,
     ],
   );
 
@@ -483,11 +537,11 @@ export function useArrangementPlayer({
     if (!isPlaying || baseTime === null) return seekTime;
 
     const elapsed = ctx.currentTime - baseTime;
-    const duration = durationRef.current;
+    const bounds = loopBoundsRef.current;
     if (loopRef.current) {
       return loopPlayheadTime(
         elapsed,
-        duration,
+        bounds,
         loopInitialStartRef.current,
       );
     }

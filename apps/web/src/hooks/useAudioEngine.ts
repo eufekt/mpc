@@ -1,5 +1,12 @@
 import { useCallback, useRef, useState } from "react";
 import { stopSource } from "../lib/audioUtils";
+import {
+  createMasterEffectsRack,
+  DEFAULT_MASTER_EFFECTS,
+  normalizeMasterEffects,
+  type MasterEffects,
+  type MasterEffectsRack,
+} from "../lib/masterEffects";
 import { playFrom, playSlice, playSliceLoop } from "../lib/sliceAudioBuffer";
 import type { ChopPlayRequest, PadMode } from "../lib/types";
 
@@ -11,6 +18,8 @@ type ActivePlayback = {
   source: AudioBufferSourceNode;
   loop: boolean;
   kind: "chop" | "track";
+  playbackRate: number;
+  reverse: boolean;
 };
 
 type TrackTransport = {
@@ -32,6 +41,8 @@ function padSourceKey(trackId: string, padKey: string): string {
 export function useAudioEngine() {
   const contextRef = useRef<AudioContext | null>(null);
   const gainNodeRef = useRef<GainNode | null>(null);
+  const effectsRackRef = useRef<MasterEffectsRack | null>(null);
+  const masterEffectsRef = useRef<MasterEffects>(DEFAULT_MASTER_EFFECTS);
   const buffersRef = useRef<Map<string, AudioBuffer>>(new Map());
   const trackNamesRef = useRef<Map<string, string>>(new Map());
   const [loadedTrackIds, setLoadedTrackIds] = useState<string[]>([]);
@@ -56,9 +67,13 @@ export function useAudioEngine() {
       const ctx = new AudioContext();
       const gain = ctx.createGain();
       gain.gain.value = volumeRef.current;
-      gain.connect(ctx.destination);
+      const rack = createMasterEffectsRack(ctx);
+      rack.apply(masterEffectsRef.current);
+      gain.connect(rack.input);
+      rack.output.connect(ctx.destination);
       contextRef.current = ctx;
       gainNodeRef.current = gain;
+      effectsRackRef.current = rack;
     }
     return contextRef.current;
   }, []);
@@ -69,6 +84,12 @@ export function useAudioEngine() {
     if (gainNodeRef.current) {
       gainNodeRef.current.gain.value = clamped;
     }
+  }, []);
+
+  const setMasterEffects = useCallback((effects: MasterEffects) => {
+    const normalized = normalizeMasterEffects(effects);
+    masterEffectsRef.current = normalized;
+    effectsRackRef.current?.apply(normalized);
   }, []);
 
   const resume = useCallback(async () => {
@@ -219,17 +240,36 @@ export function useAudioEngine() {
     const elapsed = ctx.currentTime - active.startedAt;
     const sliceLen = active.end - active.start;
     if (sliceLen <= 0) return null;
+    const progress = elapsed * active.playbackRate;
 
     if (active.loop) {
-      return active.start + (elapsed % sliceLen);
+      const loopProgress = progress % sliceLen;
+      return active.reverse
+        ? active.end - loopProgress
+        : active.start + loopProgress;
     }
 
-    const time = active.start + elapsed;
-    if (time >= active.end) {
+    if (progress >= sliceLen) {
       return null;
     }
-    return time;
+    return active.reverse
+      ? active.end - progress
+      : active.start + progress;
   }, []);
+
+  const getPlaybackDirection = useCallback(
+    (trackId: string): "forward" | "reverse" | null => {
+      const chopPlayback = chopPlaybackRef.current.get(trackId);
+      const active = chopPlayback ?? (
+        activePlaybackRef.current?.trackId === trackId
+          ? activePlaybackRef.current
+          : null
+      );
+      if (!active) return null;
+      return active.reverse ? "reverse" : "forward";
+    },
+    [],
+  );
 
   const loadTrackAudio = useCallback(
     async (trackId: string, arrayBuffer: ArrayBuffer, name: string) => {
@@ -354,6 +394,8 @@ export function useAudioEngine() {
         source,
         loop: false,
         kind: "track",
+        playbackRate: 1,
+        reverse: false,
       };
       bumpTransport();
 
@@ -422,6 +464,7 @@ export function useAudioEngine() {
             gain,
             req.volume,
             req.timeStretch,
+            req.reverse,
           );
           sources.push({ trackId: req.trackId, source, req });
         }
@@ -443,6 +486,8 @@ export function useAudioEngine() {
             source,
             loop: true,
             kind: "chop",
+            playbackRate: req.timeStretch,
+            reverse: req.reverse,
           });
         }
         return;
@@ -465,6 +510,7 @@ export function useAudioEngine() {
           req.volume,
           0,
           req.timeStretch,
+          req.reverse,
         );
         const sourceKey = padSourceKey(req.trackId, req.key);
         const startedAt = ctx.currentTime;
@@ -476,6 +522,8 @@ export function useAudioEngine() {
           source,
           loop: false,
           kind: "chop",
+          playbackRate: req.timeStretch,
+          reverse: req.reverse,
         };
         chopPlaybackRef.current.set(req.trackId, playback);
 
@@ -527,8 +575,10 @@ export function useAudioEngine() {
     getSeekTime,
     setSeekTime,
     getPlaybackTime,
+    getPlaybackDirection,
     resume,
     setVolume,
+    setMasterEffects,
     getContext,
     getMasterGain,
   };

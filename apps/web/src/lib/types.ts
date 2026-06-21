@@ -1,4 +1,5 @@
 import type { PaletteMode } from "./chopColors";
+import type { MasterEffects } from "./masterEffects";
 
 export type Chop = {
   id: string;
@@ -11,6 +12,8 @@ export type Chop = {
   volume: number;
   /** Playback speed multiplier — 1.000 = normal, 0.900 = 0.9× speed. */
   timeStretch: number;
+  /** When true, chop plays from end to start. */
+  reverse: boolean;
 };
 
 export type SourceType = "file" | "youtube";
@@ -50,10 +53,17 @@ export type ArrangementLane = {
   mode: ArrangementLaneMode;
 };
 
+export type ArrangementLoopRegion = {
+  start: number;
+  end: number;
+};
+
 export type ArrangementState = {
   lanes: ArrangementLane[];
   /** Pixel height of each timeline lane row (saved workspace preference). */
   laneRowHeight: number;
+  /** Loop bounds when arrangement loop is enabled — omit for full-length loop. */
+  loopRegion?: ArrangementLoopRegion;
 };
 
 export type SessionState = {
@@ -65,6 +75,7 @@ export type SessionState = {
   padMode: PadMode;
   volume: number;
   accentColor: string;
+  masterEffects: MasterEffects;
 };
 
 export type ProjectMeta = {
@@ -95,6 +106,7 @@ export type ChopPlayRequest = {
   key: string;
   volume: number;
   timeStretch: number;
+  reverse: boolean;
 };
 
 /** v1 layout — kept for migration from older saved sessions. */

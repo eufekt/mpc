@@ -8,11 +8,13 @@ import {
   filterLoadedTracks,
   formatDuration,
   getAllChops,
+  ARRANGEMENT_RULER_HEIGHT,
 } from "../lib/arrangement";
 import type {
   ArrangementClipStackMode,
   ArrangementLane,
   ArrangementLaneMode,
+  ArrangementLoopRegion as LoopRegion,
   Track,
 } from "../lib/types";
 import { ArrangementChopBank } from "./ArrangementChopBank";
@@ -22,6 +24,7 @@ import {
 } from "./ArrangementLaneDialog";
 import { ArrangementLanePanel } from "./ArrangementLanePanel";
 import { ArrangementLaneStrip } from "./ArrangementLaneStrip";
+import { ArrangementLoopRegion } from "./ArrangementLoopRegion";
 import { ArrangementTimelineRuler } from "./ArrangementTimelineRuler";
 
 export type ArrangementActions = {
@@ -64,12 +67,14 @@ type Props = {
   isPlaying: boolean;
   playheadTime: number;
   loop: boolean;
+  loopRegion: LoopRegion | undefined;
   transportFocused: boolean;
   onFocusTransport: () => void;
   onTogglePlay: () => void;
   onStop: () => void;
   onSeek: (time: number) => void;
   onLoopChange: (loop: boolean) => void;
+  onLoopRegionChange: (region: LoopRegion) => void;
   onAddLane: (draft: LaneDraft) => void;
   laneRowHeight: number;
   onLaneRowHeightChange: (height: number) => void;
@@ -89,12 +94,14 @@ export function ArrangementSection({
   isPlaying,
   playheadTime,
   loop,
+  loopRegion,
   transportFocused,
   onFocusTransport,
   onTogglePlay,
   onStop,
   onSeek,
   onLoopChange,
+  onLoopRegionChange,
   onAddLane,
   laneRowHeight,
   onLaneRowHeightChange,
@@ -170,6 +177,9 @@ export function ArrangementSection({
     () => computeArrangementDuration(lanes, loadedTracks),
     [lanes, loadedTracks],
   );
+
+  const loopRegionHeightPx = lanes.length * laneRowHeight;
+  const loopRegionTopPx = ARRANGEMENT_RULER_HEIGHT;
 
   const timelineScrollDuration = useMemo(
     () => computeTimelineScrollDuration(arrangementDuration),
@@ -335,30 +345,42 @@ export function ArrangementSection({
                   className="arrangement-timeline-inner"
                   style={{ width: `${timelineWidthPx}px` }}
                 >
-                  <ArrangementTimelineRuler
-                    duration={timelineScrollDuration}
-                    onSeek={onSeek}
-                  />
-                  <div className="arrangement-lane-strips">
-                    {lanes.map((lane) => (
-                      <ArrangementLaneStrip
-                        key={lane.id}
-                        lane={lane}
-                        tracks={loadedTracks}
-                        playheadTime={playheadTime}
-                        arrangementDuration={arrangementDuration}
-                        isSelected={lane.id === selectedLaneId}
-                        selectedChopKey={selectedChopKey}
-                        repeatCount={repeatCount}
-                        onSelectLane={setSelectedLaneId}
-                        onSeek={onSeek}
-                        onAddClipAt={onAddClipAt}
-                        onRemoveClip={onRemoveClip}
-                        onReorderClip={onReorderClip}
-                        onMoveClip={onMoveClip}
-                        onSetClipStackMode={onSetClipStackMode}
-                      />
-                    ))}
+                  <div className="arrangement-timeline-content">
+                    <ArrangementTimelineRuler
+                      duration={timelineScrollDuration}
+                      arrangementDuration={arrangementDuration}
+                      onSeek={onSeek}
+                      onLoopRegionChange={onLoopRegionChange}
+                    />
+                    <div className="arrangement-lane-strips">
+                      {lanes.map((lane) => (
+                        <ArrangementLaneStrip
+                          key={lane.id}
+                          lane={lane}
+                          tracks={loadedTracks}
+                          playheadTime={playheadTime}
+                          arrangementDuration={arrangementDuration}
+                          isSelected={lane.id === selectedLaneId}
+                          selectedChopKey={selectedChopKey}
+                          repeatCount={repeatCount}
+                          onSelectLane={setSelectedLaneId}
+                          onSeek={onSeek}
+                          onAddClipAt={onAddClipAt}
+                          onRemoveClip={onRemoveClip}
+                          onReorderClip={onReorderClip}
+                          onMoveClip={onMoveClip}
+                          onSetClipStackMode={onSetClipStackMode}
+                        />
+                      ))}
+                    </div>
+                    <ArrangementLoopRegion
+                      loopRegion={loopRegion}
+                      arrangementDuration={arrangementDuration}
+                      topPx={loopRegionTopPx}
+                      heightPx={loopRegionHeightPx}
+                      loopEnabled={loop}
+                      onChange={onLoopRegionChange}
+                    />
                   </div>
                 </div>
               </div>

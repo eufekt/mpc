@@ -93,6 +93,39 @@ export function playheadLeftPx(playheadTime: number): number {
   return timeToPx(Math.max(0, playheadTime));
 }
 
+export type ArrangementLoopBounds = {
+  start: number;
+  end: number;
+};
+
+export const MIN_LOOP_REGION_SECONDS = 0.25;
+
+export function resolveLoopBounds(
+  loopRegion: ArrangementLoopBounds | null | undefined,
+  arrangementDuration: number,
+): ArrangementLoopBounds {
+  const duration = Math.max(0, arrangementDuration);
+  if (duration <= 0) return { start: 0, end: 0 };
+
+  if (!loopRegion) {
+    return { start: 0, end: duration };
+  }
+
+  const start = Math.max(0, Math.min(loopRegion.start, duration));
+  let end = Math.max(start, Math.min(loopRegion.end, duration));
+  if (end - start < MIN_LOOP_REGION_SECONDS) {
+    end = Math.min(duration, start + MIN_LOOP_REGION_SECONDS);
+  }
+  return { start, end };
+}
+
+export function normalizeLoopRegion(
+  region: ArrangementLoopBounds,
+  arrangementDuration: number,
+): ArrangementLoopBounds {
+  return resolveLoopBounds(region, arrangementDuration);
+}
+
 export function filterLoadedTracks(
   tracks: Track[],
   loadedTrackIds: string[],

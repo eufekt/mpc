@@ -1,6 +1,9 @@
 node_modules
 dist
 .DS_Store
+offline/*
+!offline/.gitkeep
+!offline/urls.example.txt
 *.local
 .wrangler
 .dev.vars
