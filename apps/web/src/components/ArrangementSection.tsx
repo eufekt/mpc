@@ -10,11 +10,21 @@ import {
   getAllChops,
   ARRANGEMENT_RULER_HEIGHT,
 } from "../lib/arrangement";
+import { useTimelineZoom } from "../hooks/useTimelineZoom";
+import { timelineZoomPercent } from "../lib/timelineZoom";
+import {
+  clampBpm,
+  defaultMusicalTime,
+  normalizeMusicalTime,
+  snapDivisionLabel,
+} from "../lib/musicalTime";
 import type {
   ArrangementClipStackMode,
   ArrangementLane,
   ArrangementLaneMode,
   ArrangementLoopRegion as LoopRegion,
+  MusicalTimeSettings,
+  SnapDivision,
   Track,
 } from "../lib/types";
 import { ArrangementChopBank } from "./ArrangementChopBank";
@@ -64,10 +74,14 @@ type Props = {
   lanes: ArrangementLane[];
   tracks: Track[];
   loadedTrackIds: string[];
+  selectedLaneId: string | null;
+  onSelectedLaneIdChange: (laneId: string | null) => void;
   isPlaying: boolean;
   playheadTime: number;
   loop: boolean;
   loopRegion: LoopRegion | undefined;
+  musicalTime?: MusicalTimeSettings;
+  onMusicalTimeChange: (patch: Partial<MusicalTimeSettings>) => void;
   transportFocused: boolean;
   onFocusTransport: () => void;
   onTogglePlay: () => void;
@@ -91,10 +105,14 @@ export function ArrangementSection({
   lanes,
   tracks,
   loadedTrackIds,
+  selectedLaneId,
+  onSelectedLaneIdChange,
   isPlaying,
   playheadTime,
   loop,
   loopRegion,
+  musicalTime: musicalTimeProp,
+  onMusicalTimeChange,
   transportFocused,
   onFocusTransport,
   onTogglePlay,
@@ -121,11 +139,26 @@ export function ArrangementSection({
     onSetClipStackMode,
   } = actions;
 
-  const [selectedLaneId, setSelectedLaneId] = useState<string | null>(null);
   const [selectedChopKey, setSelectedChopKey] = useState("");
   const [repeatCount, setRepeatCount] = useState(1);
   const [laneDialog, setLaneDialog] = useState<LaneDialogState | null>(null);
   const resizeStartRef = useRef({ y: 0, height: laneRowHeight });
+  const { timelineZoom, setTimelineZoom, resetTimelineZoom, pxPerSecond } =
+    useTimelineZoom();
+
+  const musicalTime = normalizeMusicalTime(
+    musicalTimeProp ?? defaultMusicalTime(),
+  );
+
+  const handleBpmChange = (raw: string) => {
+    const parsed = Number.parseInt(raw, 10);
+    if (Number.isNaN(parsed)) return;
+    onMusicalTimeChange({ bpm: clampBpm(parsed) });
+  };
+
+  const handleSnapDivisionChange = (division: SnapDivision) => {
+    onMusicalTimeChange({ snapDivision: division });
+  };
 
   const handleLaneResizePointerDown = useCallback(
     (event: React.PointerEvent<HTMLDivElement>) => {
@@ -186,7 +219,7 @@ export function ArrangementSection({
     [arrangementDuration],
   );
 
-  const timelineWidthPx = computeTimelineWidthPx(arrangementDuration);
+  const timelineWidthPx = computeTimelineWidthPx(arrangementDuration, pxPerSecond);
   const canTransport = arrangementDuration > 0;
   const canStop = canTransport && (isPlaying || playheadTime > 0);
 
@@ -203,7 +236,7 @@ export function ArrangementSection({
   const openAddLaneDialog = () => setLaneDialog({ mode: "add" });
 
   const openEditLaneDialog = (laneId: string) => {
-    setSelectedLaneId(laneId);
+    onSelectedLaneIdChange(laneId);
     setLaneDialog({ mode: "edit", laneId });
   };
 
@@ -216,13 +249,13 @@ export function ArrangementSection({
 
   useEffect(() => {
     if (lanes.length === 0) {
-      setSelectedLaneId(null);
+      onSelectedLaneIdChange(null);
       return;
     }
     if (!selectedLaneId || !lanes.some((lane) => lane.id === selectedLaneId)) {
-      setSelectedLaneId(lanes[0].id);
+      onSelectedLaneIdChange(lanes[0].id);
     }
-  }, [lanes, selectedLaneId]);
+  }, [lanes, onSelectedLaneIdChange, selectedLaneId]);
 
   const handleAddToLane = () => {
     if (!selectedLaneId || !selectedChopKey) return;
@@ -231,6 +264,22 @@ export function ArrangementSection({
     onAddClip(selectedLaneId, sourceTrackId, chopId, repeatCount);
     setRepeatCount(1);
   };
+
+  const handleDropChop = useCallback(
+    (
+      laneId: string,
+      sourceTrackId: string,
+      chopId: string,
+      startTime: number | null,
+    ) => {
+      if (startTime === null) {
+        onAddClip(laneId, sourceTrackId, chopId, repeatCount);
+      } else {
+        onAddClipAt(laneId, sourceTrackId, chopId, startTime, repeatCount);
+      }
+    },
+    [onAddClip, onAddClipAt, repeatCount],
+  );
 
   return (
     <section className="arrangement-section" onPointerDown={onFocusTransport}>
@@ -262,7 +311,7 @@ export function ArrangementSection({
               ? () => {
                   onRemoveLane(laneDialog.laneId);
                   if (selectedLaneId === laneDialog.laneId) {
-                    setSelectedLaneId(null);
+                    onSelectedLaneIdChange(null);
                   }
                 }
               : undefined
@@ -298,6 +347,81 @@ export function ArrangementSection({
             {formatDuration(playheadTime)}
           </span>
         </div>
+        <div className="arrangement-musical-controls">
+          <label className="arrangement-musical-bpm">
+            BPM
+            <input
+              type="number"
+              min={40}
+              max={240}
+              step={1}
+              value={musicalTime.bpm}
+              onChange={(e) => handleBpmChange(e.target.value)}
+              aria-label="Beats per minute"
+            />
+          </label>
+          <button
+            type="button"
+            className={musicalTime.snapEnabled ? "active" : undefined}
+            onClick={() =>
+              onMusicalTimeChange({ snapEnabled: !musicalTime.snapEnabled })
+            }
+            title="Snap clip placement to grid"
+          >
+            SNAP
+          </button>
+          <div className="arrangement-grid-selector">
+            <span>GRID</span>
+            {([4, 8, 16] as const).map((division) => (
+              <button
+                key={division}
+                type="button"
+                className={
+                  musicalTime.snapDivision === division ? "active" : undefined
+                }
+                onClick={() => handleSnapDivisionChange(division)}
+                title={`Snap to ${snapDivisionLabel(division)} notes`}
+              >
+                {snapDivisionLabel(division)}
+              </button>
+            ))}
+          </div>
+          <button
+            type="button"
+            className={musicalTime.metronomeEnabled ? "active" : undefined}
+            onClick={() =>
+              onMusicalTimeChange({
+                metronomeEnabled: !musicalTime.metronomeEnabled,
+              })
+            }
+            title="Metronome click during arrangement playback"
+          >
+            CLICK
+          </button>
+        </div>
+        <div className="arrangement-zoom-controls">
+          <span>ZOOM</span>
+          <button
+            type="button"
+            onClick={() => setTimelineZoom(timelineZoom - 0.25)}
+            aria-label="Zoom timeline out"
+          >
+            −
+          </button>
+          <span className="arrangement-zoom-value">
+            {timelineZoomPercent(timelineZoom)}%
+          </span>
+          <button
+            type="button"
+            onClick={() => setTimelineZoom(timelineZoom + 0.25)}
+            aria-label="Zoom timeline in"
+          >
+            +
+          </button>
+          <button type="button" onClick={resetTimelineZoom}>
+            RESET
+          </button>
+        </div>
       </div>
 
       <div
@@ -313,7 +437,7 @@ export function ArrangementSection({
           lanes={lanes}
           tracks={loadedTracks}
           selectedLaneId={selectedLaneId}
-          onSelectLane={setSelectedLaneId}
+          onSelectLane={onSelectedLaneIdChange}
           onEditLane={openEditLaneDialog}
           onAddLane={openAddLaneDialog}
         />
@@ -331,7 +455,7 @@ export function ArrangementSection({
                     key={lane.id}
                     type="button"
                     className={`arrangement-lane-label${lane.id === selectedLaneId ? " selected" : ""}`}
-                    onClick={() => setSelectedLaneId(lane.id)}
+                    onClick={() => onSelectedLaneIdChange(lane.id)}
                     onDoubleClick={() => openEditLaneDialog(lane.id)}
                     title={`${lane.name} — double-click to edit`}
                   >
@@ -349,6 +473,8 @@ export function ArrangementSection({
                     <ArrangementTimelineRuler
                       duration={timelineScrollDuration}
                       arrangementDuration={arrangementDuration}
+                      pxPerSecond={pxPerSecond}
+                      musicalTime={musicalTime}
                       onSeek={onSeek}
                       onLoopRegionChange={onLoopRegionChange}
                     />
@@ -360,25 +486,37 @@ export function ArrangementSection({
                           tracks={loadedTracks}
                           playheadTime={playheadTime}
                           arrangementDuration={arrangementDuration}
+                          pxPerSecond={pxPerSecond}
+                          musicalTime={musicalTime}
                           isSelected={lane.id === selectedLaneId}
                           selectedChopKey={selectedChopKey}
                           repeatCount={repeatCount}
-                          onSelectLane={setSelectedLaneId}
+                          onSelectLane={onSelectedLaneIdChange}
                           onSeek={onSeek}
                           onAddClipAt={onAddClipAt}
                           onRemoveClip={onRemoveClip}
                           onReorderClip={onReorderClip}
                           onMoveClip={onMoveClip}
                           onSetClipStackMode={onSetClipStackMode}
+                          onDropChop={(sourceTrackId, chopId, startTime) =>
+                            handleDropChop(
+                              lane.id,
+                              sourceTrackId,
+                              chopId,
+                              startTime,
+                            )
+                          }
                         />
                       ))}
                     </div>
                     <ArrangementLoopRegion
                       loopRegion={loopRegion}
                       arrangementDuration={arrangementDuration}
+                      pxPerSecond={pxPerSecond}
                       topPx={loopRegionTopPx}
                       heightPx={loopRegionHeightPx}
                       loopEnabled={loop}
+                      musicalTime={musicalTime}
                       onChange={onLoopRegionChange}
                     />
                   </div>

@@ -6,6 +6,7 @@ type Props = {
   activeKey: string | null;
   loopingKey?: string | null;
   onPadClick: (key: string) => void;
+  onPadDoubleClick?: (key: string) => void;
 };
 
 export function PadRow({
@@ -14,6 +15,7 @@ export function PadRow({
   activeKey,
   loopingKey,
   onPadClick,
+  onPadDoubleClick,
 }: Props) {
   return (
     <div className="pad-row">
@@ -40,6 +42,7 @@ export function PadRow({
                 : undefined
             }
             onClick={() => onPadClick(key)}
+            onDoubleClick={() => onPadDoubleClick?.(key)}
           >
             {key}
           </button>

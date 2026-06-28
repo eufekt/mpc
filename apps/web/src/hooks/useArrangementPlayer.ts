@@ -10,7 +10,13 @@ import {
   type ResolvedClip,
 } from "../lib/arrangement";
 import { playSlice } from "../lib/sliceAudioBuffer";
-import type { ArrangementLane, ArrangementLoopRegion, Track } from "../lib/types";
+import { secondsPerBeat } from "../lib/musicalTime";
+import type {
+  ArrangementLane,
+  ArrangementLoopRegion,
+  MusicalTimeSettings,
+  Track,
+} from "../lib/types";
 
 const LOOKAHEAD_SECONDS = 0.05;
 /** How many loop passes to pre-schedule on the audio clock (gapless). */
@@ -49,6 +55,7 @@ type Params = {
   lanes: ArrangementLane[];
   tracks: Track[];
   loopRegion: ArrangementLoopRegion | null | undefined;
+  musicalTime: MusicalTimeSettings;
   getBuffer: (trackId: string) => AudioBuffer | undefined;
   getContext: () => AudioContext;
   getMasterGain: () => GainNode | null;
@@ -185,6 +192,64 @@ function scheduleArrangement({
   return sources;
 }
 
+const METRONOME_CLICK_SECONDS = 0.04;
+
+function scheduleMetronomeClick(
+  ctx: AudioContext,
+  masterGain: GainNode,
+  when: number,
+  accent: boolean,
+): OscillatorNode {
+  const osc = ctx.createOscillator();
+  const gain = ctx.createGain();
+  osc.type = "sine";
+  osc.frequency.value = accent ? 1200 : 880;
+  gain.gain.setValueAtTime(accent ? 0.22 : 0.12, when);
+  gain.gain.exponentialRampToValueAtTime(0.001, when + METRONOME_CLICK_SECONDS);
+  osc.connect(gain);
+  gain.connect(masterGain);
+  osc.start(when);
+  osc.stop(when + METRONOME_CLICK_SECONDS);
+  return osc;
+}
+
+function scheduleMetronomeBeats({
+  ctx,
+  masterGain,
+  settings,
+  baseTime,
+  fromTime,
+  toTime,
+  timelineOffset = 0,
+}: {
+  ctx: AudioContext;
+  masterGain: GainNode;
+  settings: MusicalTimeSettings;
+  baseTime: number;
+  fromTime: number;
+  toTime: number;
+  timelineOffset?: number;
+}): OscillatorNode[] {
+  if (!settings.metronomeEnabled) return [];
+  const step = secondsPerBeat(settings.bpm);
+  if (step <= 0) return [];
+
+  const sources: OscillatorNode[] = [];
+  let t = Math.ceil(fromTime / step) * step;
+  if (fromTime <= 0 && t > 0) t = 0;
+
+  while (t <= toTime + 1e-9) {
+    const beatIndex = Math.round(t / step);
+    const accent = beatIndex % settings.beatsPerBar === 0;
+    const when = baseTime + timelineOffset + (t - fromTime);
+    if (when >= ctx.currentTime - 0.01) {
+      sources.push(scheduleMetronomeClick(ctx, masterGain, when, accent));
+    }
+    t += step;
+  }
+  return sources;
+}
+
 function loopPlayheadTime(
   elapsed: number,
   bounds: ArrangementLoopBounds,
@@ -202,6 +267,7 @@ export function useArrangementPlayer({
   lanes,
   tracks,
   loopRegion,
+  musicalTime,
   getBuffer,
   getContext,
   getMasterGain,
@@ -210,6 +276,7 @@ export function useArrangementPlayer({
 }: Params) {
   const laneGainsRef = useRef<Map<string, GainNode>>(new Map());
   const scheduledSourcesRef = useRef<AudioBufferSourceNode[]>([]);
+  const metronomeSourcesRef = useRef<OscillatorNode[]>([]);
   const baseTimeRef = useRef<number | null>(null);
   const durationRef = useRef(0);
   const loopBoundsRef = useRef<ArrangementLoopBounds>({ start: 0, end: 0 });
@@ -221,6 +288,7 @@ export function useArrangementPlayer({
   const lanesRef = useRef(lanes);
   const tracksRef = useRef(tracks);
   const getBufferRef = useRef(getBuffer);
+  const musicalTimeRef = useRef(musicalTime);
   const [isPlaying, setIsPlaying] = useState(false);
   const [seekTime, setSeekTimeState] = useState(0);
   const [loop, setLoop] = useState(false);
@@ -234,7 +302,8 @@ export function useArrangementPlayer({
     lanesRef.current = lanes;
     tracksRef.current = tracks;
     getBufferRef.current = getBuffer;
-  }, [lanes, tracks, getBuffer]);
+    musicalTimeRef.current = musicalTime;
+  }, [lanes, tracks, getBuffer, musicalTime]);
 
   const bump = useCallback(() => {
     setVersion((n) => n + 1);
@@ -288,6 +357,14 @@ export function useArrangementPlayer({
       stopSource(source);
     }
     scheduledSourcesRef.current = [];
+    for (const osc of metronomeSourcesRef.current) {
+      try {
+        osc.stop();
+      } catch {
+        /* already stopped */
+      }
+    }
+    metronomeSourcesRef.current = [];
   }, []);
 
   const scheduleLoopIterations = useCallback(
@@ -298,6 +375,7 @@ export function useArrangementPlayer({
       const ctx = getContext();
       const bounds = loopBoundsRef.current;
       const initialStartAt = loopInitialStartRef.current;
+      const masterGain = getMasterGain();
 
       for (let i = fromIter; i < toIter; i++) {
         const { fromTime, toTime } = loopIterationSchedule(
@@ -317,10 +395,23 @@ export function useArrangementPlayer({
           timelineOffset: iterationTimelineOffset(i, bounds, initialStartAt),
         });
         scheduledSourcesRef.current.push(...sources);
+
+        if (masterGain) {
+          const clicks = scheduleMetronomeBeats({
+            ctx,
+            masterGain,
+            settings: musicalTimeRef.current,
+            baseTime,
+            fromTime,
+            toTime,
+            timelineOffset: iterationTimelineOffset(i, bounds, initialStartAt),
+          });
+          metronomeSourcesRef.current.push(...clicks);
+        }
       }
       nextLoopIterationRef.current = toIter;
     },
-    [getContext],
+    [getContext, getMasterGain],
   );
 
   const startLoopMaintainer = useCallback(() => {
@@ -488,6 +579,17 @@ export function useArrangementPlayer({
           baseTime,
           fromTime: startAt,
         });
+        if (masterGain) {
+          const clicks = scheduleMetronomeBeats({
+            ctx,
+            masterGain,
+            settings: musicalTime,
+            baseTime,
+            fromTime: startAt,
+            toTime: duration,
+          });
+          metronomeSourcesRef.current.push(...clicks);
+        }
         schedulePlaybackEnd(duration - startAt);
       }
 
@@ -516,6 +618,7 @@ export function useArrangementPlayer({
       syncLaneGains,
       tracks,
       loopRegion,
+      musicalTime,
     ],
   );
 

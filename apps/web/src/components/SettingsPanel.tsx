@@ -1,6 +1,11 @@
 import type { MasterEffects } from "../lib/masterEffects";
 import type { Theme } from "../lib/theme";
 import { normalizeMasterEffects } from "../lib/masterEffects";
+import {
+  MAX_UI_SCALE,
+  MIN_UI_SCALE,
+  uiScalePercent,
+} from "../lib/uiScale";
 
 type Props = {
   theme: Theme;
@@ -11,6 +16,9 @@ type Props = {
   onPaletteModeChange: (mode: "pastel" | "acidic") => void;
   masterEffects: MasterEffects;
   onMasterEffectsChange: (effects: MasterEffects) => void;
+  uiScale: number;
+  onUiScaleChange: (scale: number) => void;
+  onUiScaleReset: () => void;
   projectName: string;
   onClearSavedData: () => void;
 };
@@ -37,6 +45,9 @@ export function SettingsPanel({
   onPaletteModeChange,
   masterEffects,
   onMasterEffectsChange,
+  uiScale,
+  onUiScaleChange,
+  onUiScaleReset,
   projectName,
   onClearSavedData,
 }: Props) {
@@ -81,6 +92,23 @@ export function SettingsPanel({
           ACIDIC
         </button>
       </div>
+      <label className="settings-slider-field">
+        <span>UI ZOOM {uiScalePercent(uiScale)}%</span>
+        <input
+          type="range"
+          min={MIN_UI_SCALE * 100}
+          max={MAX_UI_SCALE * 100}
+          step={5}
+          value={uiScalePercent(uiScale)}
+          onChange={(e) => onUiScaleChange(Number(e.target.value) / 100)}
+        />
+      </label>
+      <button type="button" onClick={onUiScaleReset}>
+        RESET UI ZOOM
+      </button>
+      <p className="hint settings-zoom-hint">
+        fixes clipped UI after browser zoom · ⌘0 / Ctrl+0 also resets
+      </p>
       <label className="settings-color-field">
         Highlight / playhead color
         <input

@@ -2,28 +2,37 @@ import { useCallback, useRef } from "react";
 import {
   MIN_LOOP_REGION_SECONDS,
   normalizeLoopRegion,
+  pxToTime,
   resolveLoopBounds,
   seekTimeFromClientX,
   timeToPx,
 } from "../lib/arrangement";
 import { formatTimePrecise } from "../lib/timeFormat";
-import type { ArrangementLoopRegion as LoopRegion } from "../lib/types";
+import { snapTime } from "../lib/musicalTime";
+import type {
+  ArrangementLoopRegion as LoopRegion,
+  MusicalTimeSettings,
+} from "../lib/types";
 
 type Props = {
   loopRegion: LoopRegion | null | undefined;
   arrangementDuration: number;
+  pxPerSecond: number;
   topPx: number;
   heightPx: number;
   loopEnabled: boolean;
+  musicalTime?: MusicalTimeSettings;
   onChange: (region: LoopRegion) => void;
 };
 
 export function ArrangementLoopRegion({
   loopRegion,
   arrangementDuration,
+  pxPerSecond,
   topPx,
   heightPx,
   loopEnabled,
+  musicalTime,
   onChange,
 }: Props) {
   const resolvedRegion = resolveLoopBounds(loopRegion, arrangementDuration);
@@ -33,8 +42,12 @@ export function ArrangementLoopRegion({
   } | null>(null);
 
   const displayRegion = resolvedRegion;
-  const leftPx = timeToPx(displayRegion.start);
-  const widthPx = Math.max(0, timeToPx(displayRegion.end - displayRegion.start));
+  const leftPx = timeToPx(displayRegion.start, pxPerSecond);
+  const widthPx = Math.max(
+    0,
+    timeToPx(displayRegion.end - displayRegion.start, pxPerSecond),
+  );
+  const toTime = (px: number) => pxToTime(px, pxPerSecond);
 
   const commitRegion = useCallback(
     (start: number, end: number) => {
@@ -59,7 +72,8 @@ export function ArrangementLoopRegion({
       const onMove = (ev: PointerEvent) => {
         const drag = dragRef.current;
         if (!drag) return;
-        const time = seekTimeFromClientX(ev.clientX, regionEl);
+        const rawTime = seekTimeFromClientX(ev.clientX, regionEl, toTime);
+        const time = musicalTime ? snapTime(rawTime, musicalTime) : rawTime;
         if (drag.edge === "start") {
           commitRegion(
             Math.min(time, drag.initialRegion.end - MIN_LOOP_REGION_SECONDS),
@@ -83,7 +97,7 @@ export function ArrangementLoopRegion({
       window.addEventListener("pointermove", onMove);
       window.addEventListener("pointerup", onUp);
     },
-    [commitRegion, resolvedRegion],
+    [commitRegion, musicalTime, pxPerSecond, resolvedRegion],
   );
 
   if (arrangementDuration <= 0) return null;

@@ -13,6 +13,7 @@ type Options = {
   selectedChop: SelectedChop | null;
   playMode: boolean;
   hasAudio: boolean;
+  enabled?: boolean;
   onTogglePlayMode: () => void;
   onPlayKey: (key: string) => void;
   onBindKey: (trackId: string, key: string) => void;
@@ -24,6 +25,7 @@ export function useSamplerKeyboard({
   selectedChop,
   playMode,
   hasAudio,
+  enabled = true,
   onTogglePlayMode,
   onPlayKey,
   onBindKey,
@@ -33,10 +35,12 @@ export function useSamplerKeyboard({
   const selectedChopRef = useRef(selectedChop);
   const playModeRef = useRef(playMode);
   const hasAudioRef = useRef(hasAudio);
+  const enabledRef = useRef(enabled);
   tracksRef.current = tracks;
   selectedChopRef.current = selectedChop;
   playModeRef.current = playMode;
   hasAudioRef.current = hasAudio;
+  enabledRef.current = enabled;
 
   const onTogglePlayModeRef = useRef(onTogglePlayMode);
   const onPlayKeyRef = useRef(onPlayKey);
@@ -59,6 +63,7 @@ export function useSamplerKeyboard({
 
       const key = event.key.toLowerCase();
       if (!isLetterKey(key)) return;
+      if (!enabledRef.current) return;
 
       const action = resolvePadPress({
         tracks: tracksRef.current,

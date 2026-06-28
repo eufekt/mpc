@@ -4,7 +4,11 @@ import {
   type ArrangementActions,
 } from "./components/ArrangementSection";
 import { FileUpload } from "./components/FileUpload";
-import { PadRow } from "./components/PadRow";
+import { ChopInspector } from "./components/ChopInspector";
+import { KeyboardWorkspace } from "./components/KeyboardWorkspace";
+import { PadDock } from "./components/PadDock";
+import { PlayWorkspace } from "./components/PlayWorkspace";
+import { TrackSidebar } from "./components/TrackSidebar";
 import { TrackList } from "./components/TrackList";
 import { TrackModal } from "./components/TrackModal";
 import { TrackPanel } from "./components/TrackPanel";
@@ -14,6 +18,7 @@ import { ProjectsPanel } from "./components/ProjectsPanel";
 import { SettingsPanel } from "./components/SettingsPanel";
 import { useArrangementPlayer } from "./hooks/useArrangementPlayer";
 import { useAudioEngine } from "./hooks/useAudioEngine";
+import { useKeyboardModeInput } from "./hooks/useKeyboardModeInput";
 import { useMidiInput } from "./hooks/useMidiInput";
 import {
   useSamplerKeyboard,
@@ -21,15 +26,18 @@ import {
 } from "./hooks/useSamplerKeyboard";
 import { useSessionPersistence } from "./hooks/useSessionPersistence";
 import { useTheme } from "./hooks/useTheme";
+import { useUiScale } from "./hooks/useUiScale";
 import { useProjects } from "./hooks/useProjects";
 import { createTrack, createArrangementLane, useSessionState } from "./hooks/useSessionState";
-import { filterLoadedTracks } from "./lib/arrangement";
+import { filterLoadedTracks, computeArrangementDuration } from "./lib/arrangement";
+import { normalizeMusicalTime, snapTime } from "./lib/musicalTime";
 import type { PaletteMode } from "./lib/chopColors";
 import { isTypingTarget } from "./lib/keyboard";
 import {
   fetchYouTubeTitle,
   nameFromFileName,
 } from "./lib/trackNames";
+import { deleteTrackAudio } from "./lib/sessionPersistence";
 import {
   getAssignedKeys,
   getChopsForKey,
@@ -37,11 +45,24 @@ import {
   resolvePadPress,
   toChopPlayRequests,
 } from "./lib/pads";
-import { deleteTrackAudio } from "./lib/sessionPersistence";
+import {
+  DEFAULT_ROOT_MIDI_NOTE,
+  isNoteInScale,
+  semitoneOffset,
+  type ScaleId,
+} from "./lib/music";
 import type { TransportFocus } from "./lib/transport";
+import {
+  WORKFLOW_MODES,
+  workflowModeDigit,
+  workflowModeFromDigit,
+  workflowModeLabel,
+  type WorkflowMode,
+} from "./lib/workflowMode";
 
 export default function App() {
   const { theme, setTheme } = useTheme();
+  const { uiScale, setUiScale, resetUiScale } = useUiScale();
   const engine = useAudioEngine();
   const {
     projects,
@@ -86,6 +107,7 @@ export default function App() {
     setLaneVolume,
     setLaneRowHeight,
     setLoopRegion,
+    setMusicalTime,
   } = useSessionState();
 
   const [selectedChop, setSelectedChop] = useState<SelectedChop | null>(null);
@@ -97,11 +119,12 @@ export default function App() {
   const [transportFocus, setTransportFocus] = useState<TransportFocus>({
     type: "arrangement",
   });
-  const [viewVisibility, setViewVisibility] = useState({
-    tracks: true,
-    arrangement: true,
-    pads: true,
-  });
+  const [workflowMode, setWorkflowMode] = useState<WorkflowMode>("sample");
+  const [rootMidiNote, setRootMidiNote] = useState(DEFAULT_ROOT_MIDI_NOTE);
+  const [octaveOffset, setOctaveOffset] = useState(0);
+  const [scaleId, setScaleId] = useState<ScaleId>("chromatic");
+  const [activeNotes, setActiveNotes] = useState<Set<number>>(() => new Set());
+  const [selectedLaneId, setSelectedLaneId] = useState<string | null>(null);
   const [midiPanelOpen, setMidiPanelOpen] = useState(false);
   const [projectsPanelOpen, setProjectsPanelOpen] = useState(false);
   const [settingsPanelOpen, setSettingsPanelOpen] = useState(false);
@@ -110,6 +133,7 @@ export default function App() {
     lanes: session.arrangement.lanes,
     tracks: session.tracks,
     loopRegion: session.arrangement.loopRegion,
+    musicalTime: normalizeMusicalTime(session.arrangement.musicalTime),
     getBuffer: (trackId) => engine.getBuffer(trackId) ?? undefined,
     getContext: engine.getContext,
     getMasterGain: engine.getMasterGain,
@@ -164,6 +188,39 @@ export default function App() {
   const loadedTracks = useMemo(
     () => filterLoadedTracks(session.tracks, engine.loadedTrackIds),
     [session.tracks, engine.loadedTrackIds],
+  );
+
+  const arrangementDuration = useMemo(
+    () => computeArrangementDuration(session.arrangement.lanes, session.tracks),
+    [session.arrangement.lanes, session.tracks],
+  );
+
+  const totalChopCount = useMemo(
+    () => loadedTracks.reduce((sum, track) => sum + track.chops.length, 0),
+    [loadedTracks],
+  );
+
+  const activeLoadedTrack = useMemo(() => {
+    if (loadedTracks.length === 0) return null;
+    if (activeTrackId) {
+      const match = loadedTracks.find((track) => track.id === activeTrackId);
+      if (match) return match;
+    }
+    return loadedTracks[0];
+  }, [loadedTracks, activeTrackId]);
+
+  const inspectorChop = useMemo(() => {
+    if (!selectedChop) return null;
+    const track = session.tracks.find((item) => item.id === selectedChop.trackId);
+    if (!track) return null;
+    const chopIndex = track.chops.findIndex((chop) => chop.id === selectedChop.chopId);
+    if (chopIndex < 0) return null;
+    return { track, chop: track.chops[chopIndex], chopIndex };
+  }, [selectedChop, session.tracks]);
+
+  const selectedArrangementLane = useMemo(
+    () => session.arrangement.lanes.find((lane) => lane.id === selectedLaneId) ?? null,
+    [session.arrangement.lanes, selectedLaneId],
   );
 
   useEffect(() => {
@@ -243,6 +300,43 @@ export default function App() {
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [handleSpaceTransport, hasAudio]);
 
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (isTypingTarget(event.target)) return;
+      const mode = workflowModeFromDigit(event.key);
+      if (mode) {
+        event.preventDefault();
+        setWorkflowMode(mode);
+        return;
+      }
+      if (event.key === "0" && (event.metaKey || event.ctrlKey)) {
+        event.preventDefault();
+        resetUiScale();
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [resetUiScale]);
+
+  useEffect(() => {
+    if (workflowMode === "play") {
+      setSelectedChop(null);
+    }
+  }, [workflowMode]);
+
+  useEffect(() => {
+    if (workflowMode === "arrange" || workflowMode === "play") {
+      setTransportFocus({ type: "arrangement" });
+      return;
+    }
+    if (
+      (workflowMode === "sample" || workflowMode === "keyboard") &&
+      activeTrackId
+    ) {
+      setTransportFocus({ type: "track", trackId: activeTrackId });
+    }
+  }, [workflowMode, activeTrackId]);
+
   const { persistTrackAudio, cancelPendingRestore, clearPersistedSession, flushSessionSave } =
     useSessionPersistence({
       projectId,
@@ -277,9 +371,40 @@ export default function App() {
     [engine, setMasterEffects],
   );
 
-  const toggleView = (view: keyof typeof viewVisibility) => {
-    setViewVisibility((prev) => ({ ...prev, [view]: !prev[view] }));
-  };
+  const handlePadDoubleClick = useCallback(
+    (key: string) => {
+      if (workflowMode !== "arrange" || !selectedLaneId) return;
+      const bound = getChopsForKey(session.tracks, key);
+      if (bound.length === 0) return;
+      const { trackId, chop } = bound[bound.length - 1]!;
+      const lane = session.arrangement.lanes.find(
+        (item) => item.id === selectedLaneId,
+      );
+      if (!lane) return;
+      if (lane.mode === "free") {
+        const musicalTime = normalizeMusicalTime(session.arrangement.musicalTime);
+        addClipAt(
+          selectedLaneId,
+          trackId,
+          chop.id,
+          snapTime(playheadTime, musicalTime),
+          1,
+        );
+      } else {
+        addClip(selectedLaneId, trackId, chop.id, 1);
+      }
+    },
+    [
+      addClip,
+      addClipAt,
+      playheadTime,
+      selectedLaneId,
+      session.arrangement.lanes,
+      session.arrangement.musicalTime,
+      session.tracks,
+      workflowMode,
+    ],
+  );
 
   const handlePadModeChange = (mode: typeof session.padMode) => {
     if (session.padMode === "loop" && mode !== "loop") {
@@ -302,6 +427,90 @@ export default function App() {
     setActiveKey(key);
     window.setTimeout(() => setActiveKey(null), 100);
   }, []);
+
+  const keyboardChopOptions = useMemo(() => {
+    if (!activeLoadedTrack) return [];
+    return activeLoadedTrack.chops.map((chop, chopIndex) => ({
+      sourceTrackId: activeLoadedTrack.id,
+      sourceTrackName: activeLoadedTrack.name,
+      chopId: chop.id,
+      chopIndex,
+      chop,
+      duration: chop.end - chop.start,
+    }));
+  }, [activeLoadedTrack]);
+
+  const selectedKeyboardChopKey = useMemo(() => {
+    if (!selectedChop || !activeLoadedTrack) return "";
+    if (selectedChop.trackId !== activeLoadedTrack.id) return "";
+    return `${selectedChop.trackId}:${selectedChop.chopId}`;
+  }, [selectedChop, activeLoadedTrack]);
+
+  const playKeyboardNote = useCallback(
+    (midiNote: number) => {
+      if (!selectedChop) return;
+      if (!isNoteInScale(midiNote, rootMidiNote, scaleId)) return;
+
+      const track = session.tracks.find((item) => item.id === selectedChop.trackId);
+      const chop = track?.chops.find((item) => item.id === selectedChop.chopId);
+      if (!track || !chop) return;
+      if (!engine.hasTrack(track.id)) return;
+
+      stopArrangement();
+      void engine.resume();
+      void engine.playChops(
+        [
+          {
+            trackId: track.id,
+            start: chop.start,
+            end: chop.end,
+            key: `kb${midiNote}`,
+            volume: chop.volume,
+            timeStretch: chop.timeStretch,
+            reverse: chop.reverse,
+            pitchSemitones: semitoneOffset(rootMidiNote, midiNote),
+          },
+        ],
+        "layer",
+      );
+    },
+    [
+      selectedChop,
+      rootMidiNote,
+      scaleId,
+      session.tracks,
+      engine,
+      stopArrangement,
+    ],
+  );
+
+  const handleKeyboardNoteOn = useCallback(
+    (midiNote: number) => {
+      setActiveNotes((prev) => new Set(prev).add(midiNote));
+      playKeyboardNote(midiNote);
+    },
+    [playKeyboardNote],
+  );
+
+  const handleKeyboardNoteOff = useCallback((midiNote: number) => {
+    setActiveNotes((prev) => {
+      if (!prev.has(midiNote)) return prev;
+      const next = new Set(prev);
+      next.delete(midiNote);
+      return next;
+    });
+  }, []);
+
+  const handleMidiKeyboardNote = useCallback(
+    (note: number, velocity: number) => {
+      if (velocity <= 0) {
+        handleKeyboardNoteOff(note);
+        return;
+      }
+      handleKeyboardNoteOn(note);
+    },
+    [handleKeyboardNoteOff, handleKeyboardNoteOn],
+  );
 
   const handleBindKey = useCallback(
     (trackId: string, key: string) => {
@@ -356,13 +565,19 @@ export default function App() {
     [handlePadInteraction],
   );
 
-  const midi = useMidiInput({ projectId, onPadTrigger: handleMidiPad });
+  const midi = useMidiInput({
+    projectId,
+    onPadTrigger: handleMidiPad,
+    keyboardMode: workflowMode === "keyboard",
+    onKeyboardNote: handleMidiKeyboardNote,
+  });
 
   useSamplerKeyboard({
     tracks: session.tracks,
     selectedChop,
     playMode,
     hasAudio,
+    enabled: workflowMode !== "keyboard",
     onTogglePlayMode: () => setPlayMode((prev) => !prev),
     onPlayKey: (key) => {
       playKey(key);
@@ -370,6 +585,18 @@ export default function App() {
     },
     onBindKey: handleBindKey,
     onPadPress: flashPad,
+  });
+
+  useKeyboardModeInput({
+    enabled: workflowMode === "keyboard" && hasAudio,
+    hasSelectedChop: selectedChop !== null,
+    rootMidiNote,
+    octaveOffset,
+    scaleId,
+    onNoteOn: handleKeyboardNoteOn,
+    onNoteOff: handleKeyboardNoteOff,
+    onRootMidiNoteChange: setRootMidiNote,
+    onOctaveOffsetChange: setOctaveOffset,
   });
 
   const loadIntoNewTrack = async (
@@ -631,7 +858,11 @@ export default function App() {
   ]);
 
   return (
-    <main style={{ ["--accent-color" as string]: session.accentColor }}>
+    <main
+      className="app-shell"
+      data-mode={workflowMode}
+      style={{ ["--accent-color" as string]: session.accentColor }}
+    >
       <header className="top-bar">
         <h1>MPC</h1>
         <button
@@ -657,31 +888,18 @@ export default function App() {
           PLAY MODE (P)
         </button>
         <div className="top-bar-views">
-          <span>views</span>
-          <button
-            type="button"
-            className={viewVisibility.tracks ? "active" : undefined}
-            onClick={() => toggleView("tracks")}
-            title="Show or hide timeline tracks"
-          >
-            TRACKS
-          </button>
-          <button
-            type="button"
-            className={viewVisibility.arrangement ? "active" : undefined}
-            onClick={() => toggleView("arrangement")}
-            title="Show or hide arrangement"
-          >
-            ARRANGEMENT
-          </button>
-          <button
-            type="button"
-            className={viewVisibility.pads ? "active" : undefined}
-            onClick={() => toggleView("pads")}
-            title="Show or hide pads"
-          >
-            PADS
-          </button>
+          <span>mode</span>
+          {WORKFLOW_MODES.map((mode) => (
+            <button
+              key={mode}
+              type="button"
+              className={workflowMode === mode ? "active" : undefined}
+              onClick={() => setWorkflowMode(mode)}
+              title={`${workflowModeLabel(mode)} — ${workflowModeDigit(mode)}`}
+            >
+              {workflowModeLabel(mode)}
+            </button>
+          ))}
         </div>
         <div className="top-bar-panels-toggle">
           <button
@@ -762,6 +980,9 @@ export default function App() {
               onPaletteModeChange={handlePaletteChange}
               masterEffects={session.masterEffects}
               onMasterEffectsChange={handleMasterEffectsChange}
+              uiScale={uiScale}
+              onUiScaleChange={setUiScale}
+              onUiScaleReset={resetUiScale}
               projectName={activeProject?.name ?? "Untitled"}
               onClearSavedData={() => void handleClearSavedData()}
             />
@@ -794,27 +1015,60 @@ export default function App() {
         <pre>{status}</pre>
       )}
 
-      {loadedTracks.length > 0 && (
-        <>
-          {viewVisibility.tracks && (
-            <div className="timeline-stack">
-              {loadedTracks.map((track) => {
-                const buffer = engine.getBuffer(track.id);
-                if (!buffer) return null;
-                const index = session.tracks.findIndex((t) => t.id === track.id);
+      <div className="app-body">
+        {!hasAudio && (
+          <p className="hint app-body-empty">
+            load a track to use sample, arrange, play, and keyboard modes
+          </p>
+        )}
+
+        {hasAudio && (
+          <div
+            className={[
+              "workspace",
+              workflowMode === "play" ? "workspace--play" : "",
+              workflowMode === "keyboard" ? "workspace--keyboard" : "",
+              inspectorChop &&
+              workflowMode !== "play" &&
+              workflowMode !== "keyboard"
+                ? "has-inspector"
+                : "",
+            ]
+              .filter(Boolean)
+              .join(" ")}
+          >
+            {workflowMode !== "play" && (
+              <TrackSidebar
+                tracks={loadedTracks}
+                activeTrackId={activeTrackId}
+                onSelectTrack={handleSelectTrack}
+              />
+            )}
+
+            <div className="workspace-main">
+              {workflowMode === "sample" && activeLoadedTrack && (() => {
+                const buffer = engine.getBuffer(activeLoadedTrack.id);
+                if (!buffer) {
+                  return (
+                    <p className="hint">loading track audio...</p>
+                  );
+                }
+                const index = session.tracks.findIndex(
+                  (track) => track.id === activeLoadedTrack.id,
+                );
                 return (
                   <TrackPanel
-                    key={track.id}
-                    track={track}
+                    key={activeLoadedTrack.id}
+                    track={activeLoadedTrack}
                     index={index}
                     buffer={buffer}
                     paletteMode={session.paletteMode}
                     theme={theme}
                     transport={trackTransport}
                     transportVersion={engine.transportVersion}
-                    isActive={track.id === activeTrackId}
+                    isActive
                     selectedChopId={
-                      selectedChop?.trackId === track.id
+                      selectedChop?.trackId === activeLoadedTrack.id
                         ? selectedChop.chopId
                         : null
                     }
@@ -831,90 +1085,179 @@ export default function App() {
                     onRenameTrack={handleRenameTrack}
                     transportFocused={
                       transportFocus.type === "track" &&
-                      transportFocus.trackId === track.id
+                      transportFocus.trackId === activeLoadedTrack.id
                     }
-                    onFocusTransport={() => focusTrackTransport(track.id)}
+                    onFocusTransport={() =>
+                      focusTrackTransport(activeLoadedTrack.id)
+                    }
                   />
                 );
-              })}
+              })()}
+
+              {workflowMode === "sample" && !activeLoadedTrack && (
+                <p className="hint">select a track from the sidebar</p>
+              )}
+
+              {workflowMode === "arrange" && (
+                <ArrangementSection
+                  lanes={session.arrangement.lanes}
+                  tracks={session.tracks}
+                  loadedTrackIds={engine.loadedTrackIds}
+                  selectedLaneId={selectedLaneId}
+                  onSelectedLaneIdChange={setSelectedLaneId}
+                  isPlaying={arrangementPlayer.isPlaying}
+                  playheadTime={playheadTime}
+                  loop={arrangementPlayer.loop}
+                  loopRegion={session.arrangement.loopRegion}
+                  musicalTime={session.arrangement.musicalTime}
+                  onMusicalTimeChange={setMusicalTime}
+                  transportFocused={transportFocus.type === "arrangement"}
+                  onFocusTransport={focusArrangementTransport}
+                  onTogglePlay={() => void toggleArrangementPlayback()}
+                  onStop={stopArrangement}
+                  onSeek={arrangementPlayer.setSeekTime}
+                  onLoopChange={arrangementPlayer.setLoop}
+                  onLoopRegionChange={setLoopRegion}
+                  onAddLane={(draft) => {
+                    addLane({
+                      ...createArrangementLane(draft.name),
+                      mode: draft.mode,
+                      mute: draft.mute,
+                      volume: draft.volume,
+                    });
+                  }}
+                  laneRowHeight={session.arrangement.laneRowHeight}
+                  onLaneRowHeightChange={setLaneRowHeight}
+                  actions={arrangementActions}
+                />
+              )}
+
+              {workflowMode === "keyboard" && (
+                <KeyboardWorkspace
+                  track={activeLoadedTrack}
+                  chop={
+                    inspectorChop &&
+                    inspectorChop.track.id === activeLoadedTrack?.id
+                      ? inspectorChop.chop
+                      : null
+                  }
+                  chopIndex={
+                    inspectorChop &&
+                    inspectorChop.track.id === activeLoadedTrack?.id
+                      ? inspectorChop.chopIndex
+                      : 0
+                  }
+                  chopOptions={keyboardChopOptions}
+                  selectedChopKey={selectedKeyboardChopKey}
+                  onSelectChop={handleSelectChop}
+                  rootMidiNote={rootMidiNote}
+                  onRootMidiNoteChange={setRootMidiNote}
+                  scaleId={scaleId}
+                  onScaleIdChange={setScaleId}
+                  octaveOffset={octaveOffset}
+                  onOctaveOffsetChange={setOctaveOffset}
+                  activeNotes={activeNotes}
+                  onNoteOn={handleKeyboardNoteOn}
+                  onNoteOff={handleKeyboardNoteOff}
+                />
+              )}
+
+              {workflowMode === "play" && (
+                <PlayWorkspace
+                  isPlaying={arrangementPlayer.isPlaying}
+                  playheadTime={playheadTime}
+                  arrangementDuration={arrangementDuration}
+                  loop={arrangementPlayer.loop}
+                  canTransport={arrangementDuration > 0}
+                  onTogglePlay={() => void toggleArrangementPlayback()}
+                  onStop={stopArrangement}
+                  onLoopChange={arrangementPlayer.setLoop}
+                  trackCount={loadedTracks.length}
+                  chopCount={totalChopCount}
+                  padMode={session.padMode}
+                  onPadModeChange={handlePadModeChange}
+                  loopingKey={engine.loopingKey}
+                  onStopLoop={() => engine.stopLoop()}
+                  assignedKeys={assignedKeys}
+                  keyColors={keyColors}
+                  activeKey={activeKey}
+                  onPadClick={handlePadClick}
+                />
+              )}
             </div>
-          )}
 
-          {viewVisibility.tracks && viewVisibility.arrangement && <hr />}
-
-          {viewVisibility.arrangement && (
-            <ArrangementSection
-              lanes={session.arrangement.lanes}
-              tracks={session.tracks}
-              loadedTrackIds={engine.loadedTrackIds}
-              isPlaying={arrangementPlayer.isPlaying}
-              playheadTime={playheadTime}
-              loop={arrangementPlayer.loop}
-              loopRegion={session.arrangement.loopRegion}
-              transportFocused={transportFocus.type === "arrangement"}
-              onFocusTransport={focusArrangementTransport}
-              onTogglePlay={() => void toggleArrangementPlayback()}
-              onStop={stopArrangement}
-              onSeek={arrangementPlayer.setSeekTime}
-              onLoopChange={arrangementPlayer.setLoop}
-              onLoopRegionChange={setLoopRegion}
-              onAddLane={(draft) => {
-                addLane({
-                  ...createArrangementLane(draft.name),
-                  mode: draft.mode,
-                  mute: draft.mute,
-                  volume: draft.volume,
-                });
-              }}
-              laneRowHeight={session.arrangement.laneRowHeight}
-              onLaneRowHeightChange={setLaneRowHeight}
-              actions={arrangementActions}
-            />
-          )}
-        </>
-      )}
-
-      {hasAudio && viewVisibility.pads && (
-        <>
-          {(viewVisibility.tracks || viewVisibility.arrangement) && <hr />}
-          <h2>PADS</h2>
-          <section className="pad-mode-toggle">
-            <span>MODE</span>
-            <button
-              type="button"
-              className={session.padMode === "layer" ? "active" : undefined}
-              onClick={() => handlePadModeChange("layer")}
-            >
-              LAYER
-            </button>
-            <button
-              type="button"
-              className={session.padMode === "clear" ? "active" : undefined}
-              onClick={() => handlePadModeChange("clear")}
-            >
-              CLEAR
-            </button>
-            <button
-              type="button"
-              className={session.padMode === "loop" ? "active" : undefined}
-              onClick={() => handlePadModeChange("loop")}
-            >
-              LOOP
-            </button>
-            {engine.loopingKey && (
-              <button type="button" onClick={() => engine.stopLoop()}>
-                STOP
-              </button>
+            {inspectorChop &&
+              workflowMode !== "play" &&
+              workflowMode !== "keyboard" && (
+              <ChopInspector
+                track={inspectorChop.track}
+                chop={inspectorChop.chop}
+                chopIndex={inspectorChop.chopIndex}
+                paletteMode={session.paletteMode}
+                onNameChange={(name) =>
+                  handleChopNameChange(
+                    inspectorChop.track.id,
+                    inspectorChop.chop.id,
+                    name,
+                  )
+                }
+                onVolumeChange={(volume) =>
+                  handleChopVolumeChange(
+                    inspectorChop.track.id,
+                    inspectorChop.chop.id,
+                    volume,
+                  )
+                }
+                onTimeStretchChange={(timeStretch) =>
+                  handleChopTimeStretchChange(
+                    inspectorChop.track.id,
+                    inspectorChop.chop.id,
+                    timeStretch,
+                  )
+                }
+                onReverseChange={(reverse) =>
+                  handleChopReverseChange(
+                    inspectorChop.track.id,
+                    inspectorChop.chop.id,
+                    reverse,
+                  )
+                }
+                onColorChange={(color) =>
+                  handleChopColorChange(
+                    inspectorChop.track.id,
+                    inspectorChop.chop.id,
+                    color,
+                  )
+                }
+                onDelete={() =>
+                  handleDeleteChop(inspectorChop.track.id, inspectorChop.chop.id)
+                }
+                onClose={() => setSelectedChop(null)}
+              />
             )}
-          </section>
-          <PadRow
-            assignedKeys={assignedKeys}
-            keyColors={keyColors}
-            activeKey={activeKey}
-            loopingKey={engine.loopingKey}
-            onPadClick={handlePadClick}
-          />
-        </>
+          </div>
+        )}
+      </div>
+
+      {hasAudio && workflowMode !== "play" && workflowMode !== "keyboard" && (
+        <PadDock
+          padMode={session.padMode}
+          onPadModeChange={handlePadModeChange}
+          loopingKey={engine.loopingKey}
+          onStopLoop={() => engine.stopLoop()}
+          assignedKeys={assignedKeys}
+          keyColors={keyColors}
+          activeKey={activeKey}
+          onPadClick={handlePadClick}
+          onPadDoubleClick={handlePadDoubleClick}
+          arrangeHint={
+            workflowMode === "arrange" && selectedArrangementLane
+              ? `double-click pad → ${selectedArrangementLane.name}`
+              : workflowMode === "arrange"
+                ? "select a lane, double-click pad to add chop"
+                : null
+          }
+        />
       )}
     </main>
   );

@@ -1,17 +1,24 @@
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import {
   clipWidthPx,
-  formatDuration,
   normalizeLoopRegion,
-  rulerTickInterval,
+  pxToTime,
   seekTimeFromClientX,
   timeToPx,
 } from "../lib/arrangement";
-import type { ArrangementLoopRegion } from "../lib/types";
+import {
+  beatTimesInRange,
+  isBarBoundary,
+  snapTime,
+  timeToBarBeat,
+} from "../lib/musicalTime";
+import type { ArrangementLoopRegion, MusicalTimeSettings } from "../lib/types";
 
 type Props = {
   duration: number;
   arrangementDuration: number;
+  pxPerSecond: number;
+  musicalTime: MusicalTimeSettings;
   onSeek: (time: number) => void;
   onLoopRegionChange?: (region: ArrangementLoopRegion) => void;
 };
@@ -21,16 +28,30 @@ const DRAG_THRESHOLD_PX = 3;
 export function ArrangementTimelineRuler({
   duration,
   arrangementDuration,
+  pxPerSecond,
+  musicalTime,
   onSeek,
   onLoopRegionChange,
 }: Props) {
-  const widthPx = Math.max(clipWidthPx(duration), 1);
-  const interval = rulerTickInterval(Math.max(duration, 1));
-  const ticks: number[] = [];
-  const maxTime = Math.max(duration, interval);
-  for (let t = 0; t <= maxTime; t += interval) {
-    ticks.push(t);
-  }
+  const widthPx = Math.max(clipWidthPx(duration, pxPerSecond), 1);
+  const toTime = (px: number) => pxToTime(px, pxPerSecond);
+  const toPx = (time: number) => timeToPx(time, pxPerSecond);
+
+  const applySnap = useCallback(
+    (time: number) => snapTime(time, musicalTime),
+    [musicalTime],
+  );
+
+  const ticks = useMemo(() => {
+    const beatTimes = beatTimesInRange(0, duration, musicalTime.bpm);
+    return beatTimes.map((time) => ({
+      time,
+      isBar: isBarBoundary(time, musicalTime.bpm, musicalTime.beatsPerBar),
+      barLabel: isBarBoundary(time, musicalTime.bpm, musicalTime.beatsPerBar)
+        ? String(timeToBarBeat(time, musicalTime.bpm, musicalTime.beatsPerBar).bar)
+        : null,
+    }));
+  }, [duration, musicalTime.bpm, musicalTime.beatsPerBar]);
 
   const [selectPreview, setSelectPreview] = useState<ArrangementLoopRegion | null>(
     null,
@@ -45,7 +66,9 @@ export function ArrangementTimelineRuler({
       if (event.button !== 0 || !onLoopRegionChange) return;
       const ruler = event.currentTarget;
       ruler.setPointerCapture(event.pointerId);
-      const anchorTime = seekTimeFromClientX(event.clientX, ruler);
+      const anchorTime = applySnap(
+        seekTimeFromClientX(event.clientX, ruler, toTime),
+      );
       const anchorClientX = event.clientX;
       dragRef.current = { anchorTime, anchorClientX };
       let selecting = false;
@@ -57,7 +80,7 @@ export function ArrangementTimelineRuler({
           return;
         }
         selecting = true;
-        const time = seekTimeFromClientX(ev.clientX, ruler);
+        const time = applySnap(seekTimeFromClientX(ev.clientX, ruler, toTime));
         const start = Math.min(drag.anchorTime, time);
         const end = Math.max(drag.anchorTime, time);
         const preview = normalizeLoopRegion(
@@ -77,7 +100,7 @@ export function ArrangementTimelineRuler({
         if (selecting && selectPreviewRef.current && onLoopRegionChange) {
           onLoopRegionChange(selectPreviewRef.current);
         } else if (!selecting) {
-          onSeek(seekTimeFromClientX(ev.clientX, ruler));
+          onSeek(applySnap(seekTimeFromClientX(ev.clientX, ruler, toTime)));
         }
         selectPreviewRef.current = null;
         setSelectPreview(null);
@@ -86,12 +109,12 @@ export function ArrangementTimelineRuler({
       window.addEventListener("pointermove", onMove);
       window.addEventListener("pointerup", onUp);
     },
-    [arrangementDuration, onLoopRegionChange, onSeek],
+    [applySnap, arrangementDuration, onLoopRegionChange, onSeek, toTime],
   );
 
   const handleClick = (e: React.MouseEvent<HTMLDivElement>) => {
     if (!onLoopRegionChange) {
-      onSeek(seekTimeFromClientX(e.clientX, e.currentTarget));
+      onSeek(applySnap(seekTimeFromClientX(e.clientX, e.currentTarget, toTime)));
     }
   };
 
@@ -110,21 +133,21 @@ export function ArrangementTimelineRuler({
         <div
           className="arrangement-ruler-loop-preview"
           style={{
-            left: `${timeToPx(selectPreview.start)}px`,
-            width: `${Math.max(0, timeToPx(selectPreview.end - selectPreview.start))}px`,
+            left: `${toPx(selectPreview.start)}px`,
+            width: `${Math.max(0, toPx(selectPreview.end - selectPreview.start))}px`,
           }}
           aria-hidden
         />
       )}
-      {ticks.map((time) => (
+      {ticks.map(({ time, isBar, barLabel }) => (
         <div
           key={time}
-          className="arrangement-ruler-tick"
-          style={{ left: `${timeToPx(time)}px` }}
+          className={`arrangement-ruler-tick${isBar ? " bar" : " beat"}`}
+          style={{ left: `${toPx(time)}px` }}
         >
-          <span className="arrangement-ruler-label">
-            {formatDuration(time)}
-          </span>
+          {barLabel && (
+            <span className="arrangement-ruler-label">{barLabel}</span>
+          )}
         </div>
       ))}
     </div>

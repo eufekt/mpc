@@ -21,6 +21,8 @@ const MAX_LOG = 80;
 type Options = {
   projectId: string;
   onPadTrigger?: (padKey: string) => void;
+  keyboardMode?: boolean;
+  onKeyboardNote?: (note: number, velocity: number) => void;
 };
 
 function collectPorts(access: MIDIAccess): {
@@ -50,7 +52,12 @@ function collectPorts(access: MIDIAccess): {
   return { inputs, outputs };
 }
 
-export function useMidiInput({ projectId, onPadTrigger }: Options) {
+export function useMidiInput({
+  projectId,
+  onPadTrigger,
+  keyboardMode = false,
+  onKeyboardNote,
+}: Options) {
   const [supported] = useState(() => "requestMIDIAccess" in navigator);
   const [connected, setConnected] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -69,10 +76,14 @@ export function useMidiInput({ projectId, onPadTrigger }: Options) {
   const bindingsRef = useRef(bindings);
   const learnPadRef = useRef(learnPad);
   const onPadTriggerRef = useRef(onPadTrigger);
+  const keyboardModeRef = useRef(keyboardMode);
+  const onKeyboardNoteRef = useRef(onKeyboardNote);
 
   bindingsRef.current = bindings;
   learnPadRef.current = learnPad;
   onPadTriggerRef.current = onPadTrigger;
+  keyboardModeRef.current = keyboardMode;
+  onKeyboardNoteRef.current = onKeyboardNote;
 
   const queryPermission = useCallback(async (sysex: boolean) => {
     try {
@@ -125,6 +136,23 @@ export function useMidiInput({ projectId, onPadTrigger }: Options) {
         if (partial) {
           upsertBinding({ ...partial, padKey: armedPad });
           setLearnPad(null);
+        }
+        return;
+      }
+
+      if (
+        keyboardModeRef.current &&
+        entry.note !== undefined &&
+        (entry.type === "noteon" || entry.type === "noteoff")
+      ) {
+        const velocity =
+          entry.type === "noteoff" ? 0 : (entry.velocity ?? 0);
+        if (entry.type === "noteon" && velocity <= 0) {
+          onKeyboardNoteRef.current?.(entry.note, 0);
+        } else if (entry.type === "noteon") {
+          onKeyboardNoteRef.current?.(entry.note, velocity);
+        } else {
+          onKeyboardNoteRef.current?.(entry.note, 0);
         }
         return;
       }

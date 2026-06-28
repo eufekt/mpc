@@ -7,13 +7,19 @@ import {
   percentToTimeStretch,
   timeStretchToPercent,
 } from "../lib/arrangement";
+import {
+  CHOP_DRAG_MIME,
+  encodeChopDragKey,
+} from "../lib/chopDrag";
 import type { Chop } from "../lib/types";
 import { formatTimePrecise } from "../lib/timeFormat";
 
 type Props = {
+  trackId: string;
   chops: Chop[];
   paletteMode: PaletteMode;
   selectedId: string | null;
+  compact?: boolean;
   onSelect: (id: string) => void;
   onDelete: (id: string) => void;
   onNameChange: (id: string, name: string) => void;
@@ -30,9 +36,11 @@ type ColorMenuState = {
 };
 
 export function ChopTable({
+  trackId,
   chops,
   paletteMode,
   selectedId,
+  compact = false,
   onSelect,
   onDelete,
   onNameChange,
@@ -77,35 +85,52 @@ export function ChopTable({
     ? chops.find((chop) => chop.id === colorMenu.chopId)
     : null;
 
+  const handleDragStart = (
+    event: React.DragEvent<HTMLSpanElement>,
+    chopId: string,
+  ) => {
+    event.dataTransfer.setData(
+      CHOP_DRAG_MIME,
+      encodeChopDragKey(trackId, chopId),
+    );
+    event.dataTransfer.effectAllowed = "copy";
+  };
+
   if (chops.length === 0) {
     return <p>no chops — drag on waveform to create</p>;
   }
 
   return (
     <>
-      <table className="chop-table">
+      <table
+        className={["chop-table", compact ? "chop-table--compact" : ""]
+          .filter(Boolean)
+          .join(" ")}
+      >
         <colgroup>
+          <col className="chop-col-drag" />
           <col className="chop-col-color" />
           <col className="chop-col-name" />
           <col className="chop-col-time" />
           <col className="chop-col-time" />
           <col className="chop-col-key" />
-          <col className="chop-col-vol" />
-          <col className="chop-col-spd" />
-          <col className="chop-col-rev" />
+          {!compact && <col className="chop-col-vol" />}
+          {!compact && <col className="chop-col-spd" />}
+          {!compact && <col className="chop-col-rev" />}
           <col className="chop-col-delete" />
         </colgroup>
         <thead>
           <tr>
-            <th className="chop-color-cell"></th>
+            <th className="chop-drag-cell" aria-label="drag" />
+            <th className="chop-color-cell" />
             <th className="chop-name-cell">#</th>
             <th className="chop-time-cell">start</th>
             <th className="chop-time-cell">end</th>
             <th className="chop-key-cell">key</th>
-            <th className="chop-vol-cell">vol</th>
-            <th className="chop-spd-cell">spd</th>
-            <th className="chop-rev-cell">rev</th>
-            <th className="chop-delete-cell"></th>
+            {!compact && <th className="chop-vol-cell">vol</th>}
+            {!compact && <th className="chop-spd-cell">spd</th>}
+            {!compact && <th className="chop-rev-cell">rev</th>}
+            <th className="chop-delete-cell" />
           </tr>
         </thead>
         <tbody>
@@ -115,6 +140,18 @@ export function ChopTable({
               className={selectedId === chop.id ? "selected" : undefined}
               onClick={() => onSelect(chop.id)}
             >
+              <td className="chop-drag-cell">
+                <span
+                  className="chop-drag-handle"
+                  draggable
+                  title="drag to arrangement lane"
+                  onMouseDown={(e) => e.stopPropagation()}
+                  onClick={(e) => e.stopPropagation()}
+                  onDragStart={(e) => handleDragStart(e, chop.id)}
+                >
+                  ⋮⋮
+                </span>
+              </td>
               <td className="chop-color-cell">
                 <button
                   type="button"
@@ -134,76 +171,89 @@ export function ChopTable({
                 />
               </td>
               <td className="chop-name-cell">
-                <input
-                  type="text"
-                  className="chop-name-input"
-                  value={chop.name ?? ""}
-                  placeholder={String(index + 1)}
-                  aria-label={`chop ${index + 1} name`}
-                  onClick={(e) => e.stopPropagation()}
-                  onPointerDown={(e) => e.stopPropagation()}
-                  onChange={(e) => onNameChange(chop.id, e.target.value)}
-                />
+                {compact ? (
+                  <span className="chop-name-display">
+                    {chop.name?.trim() || String(index + 1)}
+                  </span>
+                ) : (
+                  <input
+                    type="text"
+                    className="chop-name-input"
+                    value={chop.name ?? ""}
+                    placeholder={String(index + 1)}
+                    aria-label={`chop ${index + 1} name`}
+                    onClick={(e) => e.stopPropagation()}
+                    onPointerDown={(e) => e.stopPropagation()}
+                    onChange={(e) => onNameChange(chop.id, e.target.value)}
+                  />
+                )}
               </td>
               <td className="chop-time-cell">{formatTimePrecise(chop.start)}</td>
               <td className="chop-time-cell">{formatTimePrecise(chop.end)}</td>
               <td className="chop-key-cell">{chop.key?.toUpperCase() ?? "—"}</td>
-              <td className="chop-volume-cell">
-                <input
-                  type="number"
-                  className="chop-volume-input"
-                  min={0}
-                  max={100}
-                  step={1}
-                  value={Math.round(chop.volume * 100)}
-                  aria-label={`chop ${index + 1} volume`}
-                  onClick={(e) => e.stopPropagation()}
-                  onChange={(e) => {
-                    e.stopPropagation();
-                    const next = Number.parseInt(e.target.value, 10);
-                    if (Number.isFinite(next)) {
-                      onVolumeChange(
-                        chop.id,
-                        Math.min(100, Math.max(0, next)) / 100,
-                      );
-                    }
-                  }}
-                />
-              </td>
-              <td className="chop-spd-cell">
-                <input
-                  type="number"
-                  className="chop-stretch"
-                  min={MIN_TIME_STRETCH_PERCENT}
-                  max={MAX_TIME_STRETCH_PERCENT}
-                  step={1}
-                  value={timeStretchToPercent(chop.timeStretch)}
-                  aria-label={`chop ${index + 1} speed`}
-                  onClick={(e) => e.stopPropagation()}
-                  onChange={(e) => {
-                    e.stopPropagation();
-                    const next = Number.parseInt(e.target.value, 10);
-                    if (Number.isFinite(next)) {
-                      onTimeStretchChange(chop.id, percentToTimeStretch(next));
-                    }
-                  }}
-                />
-              </td>
-              <td className="chop-rev-cell">
-                <button
-                  type="button"
-                  className={chop.reverse ? "active" : undefined}
-                  aria-label={`chop ${index + 1} reverse`}
-                  aria-pressed={chop.reverse}
-                  title="reverse playback"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    onReverseChange(chop.id, !chop.reverse);
-                  }}
-                >
-                  rev
-                </button>
-              </td>
+              {!compact && (
+                <>
+                  <td className="chop-volume-cell">
+                    <input
+                      type="number"
+                      className="chop-volume-input"
+                      min={0}
+                      max={100}
+                      step={1}
+                      value={Math.round(chop.volume * 100)}
+                      aria-label={`chop ${index + 1} volume`}
+                      onClick={(e) => e.stopPropagation()}
+                      onChange={(e) => {
+                        e.stopPropagation();
+                        const next = Number.parseInt(e.target.value, 10);
+                        if (Number.isFinite(next)) {
+                          onVolumeChange(
+                            chop.id,
+                            Math.min(100, Math.max(0, next)) / 100,
+                          );
+                        }
+                      }}
+                    />
+                  </td>
+                  <td className="chop-spd-cell">
+                    <input
+                      type="number"
+                      className="chop-stretch"
+                      min={MIN_TIME_STRETCH_PERCENT}
+                      max={MAX_TIME_STRETCH_PERCENT}
+                      step={1}
+                      value={timeStretchToPercent(chop.timeStretch)}
+                      aria-label={`chop ${index + 1} speed`}
+                      onClick={(e) => e.stopPropagation()}
+                      onChange={(e) => {
+                        e.stopPropagation();
+                        const next = Number.parseInt(e.target.value, 10);
+                        if (Number.isFinite(next)) {
+                          onTimeStretchChange(
+                            chop.id,
+                            percentToTimeStretch(next),
+                          );
+                        }
+                      }}
+                    />
+                  </td>
+                  <td className="chop-rev-cell">
+                    <button
+                      type="button"
+                      className={chop.reverse ? "active" : undefined}
+                      aria-label={`chop ${index + 1} reverse`}
+                      aria-pressed={chop.reverse}
+                      title="reverse playback"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onReverseChange(chop.id, !chop.reverse);
+                      }}
+                    >
+                      rev
+                    </button>
+                  </td>
+                </>
+              )}
               <td className="chop-delete-cell">
                 <button
                   type="button"

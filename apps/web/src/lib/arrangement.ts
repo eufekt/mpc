@@ -1,3 +1,4 @@
+import { clampTimelineZoom } from "./timelineZoom";
 import type {
   ArrangementClip,
   ArrangementClipStackMode,
@@ -72,25 +73,44 @@ export function computeTimelineLaneAreaHeight(
   return ARRANGEMENT_RULER_HEIGHT + laneCount * clampLaneRowHeight(laneRowHeight);
 }
 
-export function clipWidthPx(duration: number): number {
-  return Math.max(0, duration) * ARRANGEMENT_PX_PER_SECOND;
+export function clipWidthPx(
+  duration: number,
+  pxPerSecond = ARRANGEMENT_PX_PER_SECOND,
+): number {
+  return Math.max(0, duration) * pxPerSecond;
 }
 
-export function timeToPx(time: number): number {
-  return Math.max(0, time) * ARRANGEMENT_PX_PER_SECOND;
+export function timeToPx(
+  time: number,
+  pxPerSecond = ARRANGEMENT_PX_PER_SECOND,
+): number {
+  return Math.max(0, time) * pxPerSecond;
 }
 
-export function pxToTime(px: number): number {
-  return Math.max(0, px) / ARRANGEMENT_PX_PER_SECOND;
+export function pxToTime(
+  px: number,
+  pxPerSecond = ARRANGEMENT_PX_PER_SECOND,
+): number {
+  return Math.max(0, px) / pxPerSecond;
 }
 
 /** Signed px → seconds — for drag deltas (may be negative). */
-export function pxDeltaToTime(px: number): number {
-  return px / ARRANGEMENT_PX_PER_SECOND;
+export function pxDeltaToTime(
+  px: number,
+  pxPerSecond = ARRANGEMENT_PX_PER_SECOND,
+): number {
+  return px / pxPerSecond;
 }
 
-export function playheadLeftPx(playheadTime: number): number {
-  return timeToPx(Math.max(0, playheadTime));
+export function playheadLeftPx(
+  playheadTime: number,
+  pxPerSecond = ARRANGEMENT_PX_PER_SECOND,
+): number {
+  return timeToPx(Math.max(0, playheadTime), pxPerSecond);
+}
+
+export function timelinePxPerSecond(zoom = 1): number {
+  return ARRANGEMENT_PX_PER_SECOND * clampTimelineZoom(zoom);
 }
 
 export type ArrangementLoopBounds = {
@@ -161,8 +181,12 @@ export function getClipLeftPx(
   lane: ArrangementLane,
   resolvedClips: ResolvedClip[],
   clipIndex: number,
+  pxPerSecond = ARRANGEMENT_PX_PER_SECOND,
 ): number {
-  return timeToPx(getClipStartTime(lane, resolvedClips, clipIndex));
+  return timeToPx(
+    getClipStartTime(lane, resolvedClips, clipIndex),
+    pxPerSecond,
+  );
 }
 
 export type TimelineSegment = {
@@ -463,7 +487,10 @@ export function computeTimelineScrollDuration(contentDuration: number): number {
   );
 }
 
-export function computeTimelineWidthPx(contentDuration: number): number {
-  return clipWidthPx(computeTimelineScrollDuration(contentDuration));
+export function computeTimelineWidthPx(
+  contentDuration: number,
+  pxPerSecond = ARRANGEMENT_PX_PER_SECOND,
+): number {
+  return clipWidthPx(computeTimelineScrollDuration(contentDuration), pxPerSecond);
 }
 

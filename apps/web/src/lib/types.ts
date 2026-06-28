@@ -58,12 +58,26 @@ export type ArrangementLoopRegion = {
   end: number;
 };
 
+export type SnapDivision = 4 | 8 | 16;
+
+export type MusicalTimeSettings = {
+  /** Default 90, clamped 40–240. */
+  bpm: number;
+  /** Default 4 (4/4 in v1 UI). */
+  beatsPerBar: number;
+  snapEnabled: boolean;
+  /** Default 16 (sixteenth notes). */
+  snapDivision: SnapDivision;
+  metronomeEnabled: boolean;
+};
+
 export type ArrangementState = {
   lanes: ArrangementLane[];
   /** Pixel height of each timeline lane row (saved workspace preference). */
   laneRowHeight: number;
   /** Loop bounds when arrangement loop is enabled — omit for full-length loop. */
   loopRegion?: ArrangementLoopRegion;
+  musicalTime?: MusicalTimeSettings;
 };
 
 export type SessionState = {
@@ -107,6 +121,8 @@ export type ChopPlayRequest = {
   volume: number;
   timeStretch: number;
   reverse: boolean;
+  /** Semitone offset from the chop's natural pitch (keyboard mode). */
+  pitchSemitones?: number;
 };
 
 /** v1 layout — kept for migration from older saved sessions. */

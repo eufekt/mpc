@@ -213,9 +213,11 @@ export const TrackPanel = memo(function TrackPanel({
         />
 
         <ChopTable
+          trackId={track.id}
           chops={track.chops}
           paletteMode={paletteMode}
           selectedId={isActive ? selectedChopId : null}
+          compact
           onSelect={handleSelectChop}
           onDelete={handleDeleteChop}
           onNameChange={handleTableNameChange}

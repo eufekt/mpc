@@ -7,8 +7,13 @@ import {
   type MasterEffects,
   type MasterEffectsRack,
 } from "../lib/masterEffects";
+import { pitchRatioFromSemitones } from "../lib/music";
 import { playFrom, playSlice, playSliceLoop } from "../lib/sliceAudioBuffer";
 import type { ChopPlayRequest, PadMode } from "../lib/types";
+
+function effectivePlaybackRate(req: ChopPlayRequest): number {
+  return req.timeStretch * pitchRatioFromSemitones(req.pitchSemitones ?? 0);
+}
 
 type ActivePlayback = {
   trackId: string;
@@ -456,6 +461,7 @@ export function useAudioEngine() {
         for (const req of requests) {
           const buffer = buffersRef.current.get(req.trackId);
           if (!buffer) continue;
+          const rate = effectivePlaybackRate(req);
           const source = playSliceLoop(
             ctx,
             buffer,
@@ -463,7 +469,7 @@ export function useAudioEngine() {
             req.end,
             gain,
             req.volume,
-            req.timeStretch,
+            rate,
             req.reverse,
           );
           sources.push({ trackId: req.trackId, source, req });
@@ -486,7 +492,7 @@ export function useAudioEngine() {
             source,
             loop: true,
             kind: "chop",
-            playbackRate: req.timeStretch,
+            playbackRate: effectivePlaybackRate(req),
             reverse: req.reverse,
           });
         }
@@ -501,6 +507,7 @@ export function useAudioEngine() {
           stopPad(req.trackId, req.key);
         }
 
+        const rate = effectivePlaybackRate(req);
         const source = playSlice(
           ctx,
           buffer,
@@ -509,7 +516,7 @@ export function useAudioEngine() {
           gain,
           req.volume,
           0,
-          req.timeStretch,
+          rate,
           req.reverse,
         );
         const sourceKey = padSourceKey(req.trackId, req.key);
@@ -522,7 +529,7 @@ export function useAudioEngine() {
           source,
           loop: false,
           kind: "chop",
-          playbackRate: req.timeStretch,
+          playbackRate: effectivePlaybackRate(req),
           reverse: req.reverse,
         };
         chopPlaybackRef.current.set(req.trackId, playback);

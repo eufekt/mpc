@@ -27,6 +27,8 @@
   --lane-highlight: rgba(0, 0, 0, 0.03);
   --volume-track: #000;
   --volume-thumb: #000;
+  --pad-dock-height: 120px;
+  --ui-scale: 1;
 }
 
 [data-theme="dark"] {
@@ -63,14 +65,31 @@ body {
   font-family: "Courier New", Courier, monospace;
   font-size: 14px;
   line-height: 1.4;
+  zoom: var(--ui-scale, 1);
 }
 
 main {
-  max-width: 900px;
+  max-width: 1400px;
+  margin: 0 auto;
   padding: 16px;
   display: flex;
   flex-direction: column;
   gap: 16px;
+}
+
+.app-shell {
+  min-height: 100vh;
+}
+
+.app-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.app-body-empty {
+  padding: 24px 0;
 }
 
 h1,
@@ -122,6 +141,7 @@ input[type="text"] {
   z-index: 10;
   display: flex;
   flex-direction: row;
+  flex-wrap: wrap;
   align-items: center;
   gap: 8px;
   background: var(--bg);
@@ -194,6 +214,31 @@ input[type="color"] {
   border: 1px solid var(--border);
   background: var(--bg);
   cursor: pointer;
+}
+
+.chop-drag-handle {
+  cursor: grab;
+  user-select: none;
+  font-size: 10px;
+  letter-spacing: -2px;
+  color: var(--text-secondary);
+}
+
+.chop-drag-handle:active {
+  cursor: grabbing;
+}
+
+.chop-name-display {
+  font-size: 10px;
+  font-weight: bold;
+}
+
+.chop-table--compact .chop-col-name {
+  width: 14%;
+}
+
+.chop-table--compact .chop-col-time {
+  width: 22%;
 }
 
 .chop-color-cell {
@@ -346,6 +391,10 @@ tr.selected input[type="range"]:focus-visible {
 .chop-table {
   table-layout: fixed;
   width: 100%;
+}
+
+.chop-col-drag {
+  width: 4%;
 }
 
 .chop-col-color {
@@ -788,6 +837,11 @@ pre {
   font-size: 12px;
 }
 
+.settings-zoom-hint {
+  margin: 0;
+  font-size: 11px;
+}
+
 .settings-effects {
   display: flex;
   flex-direction: column;
@@ -1200,6 +1254,19 @@ pre {
   margin-right: auto;
 }
 
+.arrangement-zoom-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+}
+
+.arrangement-zoom-value {
+  min-width: 3.5ch;
+  text-align: center;
+}
+
 .arrangement-transport {
   display: flex;
   align-items: center;
@@ -1210,6 +1277,48 @@ pre {
   font-weight: bold;
   background: var(--emphasis-bg);
   color: var(--emphasis-fg);
+}
+
+.arrangement-musical-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+}
+
+.arrangement-musical-controls button.active {
+  font-weight: bold;
+  background: var(--emphasis-bg);
+  color: var(--emphasis-fg);
+}
+
+.arrangement-musical-bpm {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.arrangement-musical-bpm input {
+  width: 3.5rem;
+  font-family: inherit;
+  font-size: inherit;
+  border: 1px solid var(--border);
+  padding: 2px 4px;
+  background: var(--bg);
+  color: var(--fg);
+}
+
+.arrangement-grid-selector {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.arrangement-grid-selector button {
+  font-size: 10px;
+  padding: 2px 5px;
+  min-width: 2.5ch;
 }
 
 .arrangement-duration,
@@ -1290,6 +1399,14 @@ pre {
   bottom: 0;
   border-left: 1px solid var(--border-faint);
   pointer-events: none;
+}
+
+.arrangement-ruler-tick.bar {
+  border-left-color: var(--border);
+}
+
+.arrangement-ruler-tick.beat {
+  opacity: 0.65;
 }
 
 .arrangement-ruler-label {
@@ -1513,4 +1630,487 @@ pre {
 .chop-picker-key {
   min-width: 1ch;
   text-align: center;
+}
+
+.workspace {
+  display: grid;
+  grid-template-columns: minmax(160px, 200px) minmax(0, 1fr);
+  gap: 16px;
+  align-items: start;
+}
+
+.workspace.has-inspector {
+  grid-template-columns: minmax(160px, 200px) minmax(0, 1fr) minmax(220px, 260px);
+}
+
+.workspace--play {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.workspace--play .workspace-main {
+  min-height: 360px;
+}
+
+.workspace-main {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.track-sidebar {
+  border: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.track-sidebar-header {
+  padding: 6px 8px;
+  font-size: 11px;
+  font-weight: bold;
+  border-bottom: 1px solid var(--border);
+  background: var(--muted-bg);
+}
+
+.track-sidebar-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.track-sidebar-item {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  width: 100%;
+  padding: 8px;
+  border: none;
+  border-bottom: 1px solid var(--border-subtle);
+  background: var(--bg);
+  font-family: inherit;
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.track-sidebar-item.active {
+  background: var(--emphasis-bg);
+  color: var(--emphasis-fg);
+}
+
+.track-sidebar-item-top {
+  display: flex;
+  gap: 4px;
+  min-width: 0;
+  width: 100%;
+}
+
+.track-sidebar-index {
+  font-weight: bold;
+  flex-shrink: 0;
+}
+
+.track-sidebar-name {
+  font-weight: bold;
+  text-transform: uppercase;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.track-sidebar-meta {
+  font-size: 10px;
+  opacity: 0.85;
+}
+
+.chop-inspector {
+  border: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 8px;
+  min-width: 0;
+}
+
+.chop-inspector-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-weight: bold;
+  font-size: 11px;
+}
+
+.chop-inspector-track {
+  font-size: 11px;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+}
+
+.chop-inspector-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 11px;
+}
+
+.chop-inspector-field input[type="text"],
+.chop-inspector-field input[type="number"] {
+  width: 100%;
+  max-width: none;
+  font-size: inherit;
+}
+
+.chop-inspector-field input[type="range"] {
+  width: 100%;
+}
+
+.chop-inspector-check {
+  flex-direction: row;
+  align-items: center;
+}
+
+.chop-inspector-swatch {
+  width: 32px;
+  height: 24px;
+  border: 1px solid var(--border);
+  padding: 0;
+  cursor: pointer;
+}
+
+.chop-inspector-times {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 11px;
+}
+
+.chop-inspector-key {
+  font-size: 18px;
+  font-weight: bold;
+}
+
+.chop-inspector-hint {
+  font-size: 10px;
+}
+
+.chop-inspector-delete {
+  margin-top: 4px;
+}
+
+.pad-dock {
+  flex-shrink: 0;
+  background: var(--bg);
+  border-top: 1px solid var(--border);
+  margin: 0 -16px -16px;
+  padding: 8px 16px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.pad-dock-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+}
+
+.pad-dock-label {
+  font-weight: bold;
+}
+
+.pad-dock-hint {
+  margin-left: auto;
+  font-size: 11px;
+}
+
+.play-workspace {
+  border: 1px solid var(--border);
+  padding: 24px 16px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+  text-align: center;
+  flex: 1;
+}
+
+.play-workspace-pads {
+  width: 100%;
+  max-width: 720px;
+  border-top: 1px solid var(--border);
+  padding-top: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  align-items: center;
+}
+
+.play-workspace-pads-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  font-size: 12px;
+  width: 100%;
+}
+
+.play-workspace-pads .pad-row {
+  justify-content: center;
+}
+
+.app-shell[data-mode="play"] .play-workspace .pad {
+  width: 44px;
+  height: 44px;
+  font-size: 15px;
+}
+
+.play-workspace-summary {
+  color: var(--text-secondary);
+}
+
+.play-workspace-transport {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+
+.play-workspace-hint {
+  max-width: 420px;
+}
+
+.workspace--keyboard {
+  grid-template-columns: minmax(140px, 200px) minmax(0, 1fr);
+}
+
+.workspace--keyboard .workspace-main {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.keyboard-workspace {
+  border: 1px solid var(--border);
+  padding: 20px 16px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+  text-align: center;
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+
+.keyboard-workspace-summary {
+  color: var(--text-secondary);
+  font-size: 13px;
+}
+
+.keyboard-workspace-chops {
+  width: 100%;
+  max-width: 720px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  align-items: stretch;
+}
+
+.keyboard-workspace-chops-label {
+  font-size: 11px;
+  color: var(--text-secondary);
+  text-align: left;
+}
+
+.keyboard-workspace-chop-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  justify-content: flex-start;
+}
+
+.keyboard-workspace-chop-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.keyboard-workspace-chop-item.selected {
+  border-color: var(--accent-color, var(--border));
+  background: var(--lane-highlight);
+}
+
+.keyboard-workspace-chop-swatch {
+  width: 10px;
+  height: 10px;
+  flex-shrink: 0;
+}
+
+.keyboard-workspace-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px 20px;
+  justify-content: center;
+  align-items: center;
+  width: 100%;
+  max-width: 720px;
+}
+
+.keyboard-workspace-control {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+}
+
+.keyboard-workspace-control select {
+  min-width: 100px;
+}
+
+.keyboard-workspace-octave-label {
+  font-size: 11px;
+  color: var(--text-secondary);
+  min-width: 80px;
+}
+
+.keyboard-workspace-hint {
+  max-width: 520px;
+  font-size: 11px;
+}
+
+.piano-keyboard {
+  position: relative;
+  width: 100%;
+  max-width: 720px;
+  height: 160px;
+  user-select: none;
+  touch-action: none;
+}
+
+.piano-keyboard-whites {
+  display: flex;
+  width: 100%;
+  height: 100%;
+}
+
+.piano-keyboard-blacks {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 62%;
+  pointer-events: none;
+}
+
+.piano-key {
+  border: none;
+  padding: 0;
+  margin: 0;
+  cursor: pointer;
+  font: inherit;
+}
+
+.piano-key--white {
+  flex: 1 1 0;
+  min-width: 0;
+  height: 100%;
+  background: #e8e8e8;
+  border: 1px solid #999;
+  border-radius: 0 0 4px 4px;
+  pointer-events: auto;
+}
+
+.piano-key--white.piano-key--active,
+.piano-key--white:active:not(:disabled) {
+  background: var(--accent-color, #888);
+}
+
+.piano-key--white.piano-key--root {
+  background: color-mix(in srgb, var(--accent-color, #888) 25%, #e8e8e8);
+}
+
+.piano-key--white.piano-key--disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+.piano-key--black {
+  position: absolute;
+  top: 0;
+  width: calc(100% / var(--piano-white-count, 14) * 0.55);
+  height: 100%;
+  left: calc(
+    var(--piano-black-index) * (100% / var(--piano-white-count, 14)) -
+      (100% / var(--piano-white-count, 14) * 0.55) / 2
+  );
+  background: #222;
+  border: 1px solid #000;
+  border-radius: 0 0 3px 3px;
+  z-index: 1;
+  pointer-events: auto;
+}
+
+.piano-key--black.piano-key--active,
+.piano-key--black:active:not(:disabled) {
+  background: var(--accent-color, #555);
+}
+
+.piano-key--black.piano-key--root {
+  background: color-mix(in srgb, var(--accent-color, #888) 40%, #222);
+}
+
+.piano-key--black.piano-key--disabled {
+  opacity: 0.25;
+  cursor: not-allowed;
+}
+
+.piano-keyboard-whites {
+  --piano-white-count: 14;
+}
+
+.piano-keyboard-blacks {
+  --piano-white-count: 14;
+}
+
+.arrangement-clip-strip.drop-active {
+  outline: 2px dashed var(--accent-color, var(--border));
+  outline-offset: -2px;
+  background: var(--lane-highlight);
+}
+
+@media (max-width: 900px) {
+  .workspace.has-inspector {
+    grid-template-columns: minmax(140px, 180px) minmax(0, 1fr);
+  }
+
+  .chop-inspector {
+    grid-column: 1 / -1;
+  }
+}
+
+@media (max-width: 640px) {
+  .workspace,
+  .workspace.has-inspector {
+    grid-template-columns: 1fr;
+  }
+
+  .track-sidebar {
+    order: -1;
+  }
+
+  .pad-dock-hint {
+    margin-left: 0;
+    width: 100%;
+  }
 }

@@ -18,6 +18,7 @@ import type {
   ArrangementLaneMode,
   ArrangementLoopRegion,
   Chop,
+  MusicalTimeSettings,
   PadMode,
   SessionState,
   Track,
@@ -25,6 +26,7 @@ import type {
 import { createTrackId } from "../lib/trackIds";
 import { DEFAULT_ACCENT_COLOR } from "../lib/transport";
 import { DEFAULT_MASTER_EFFECTS, type MasterEffects } from "../lib/masterEffects";
+import { defaultMusicalTime, normalizeMusicalTime, snapTime } from "../lib/musicalTime";
 
 export function createTrack(
   params: Pick<Track, "sourceType" | "sourceName" | "name"> & {
@@ -61,7 +63,11 @@ function createInitialState(): SessionState {
   return {
     version: 3,
     tracks: [],
-    arrangement: { lanes: [], laneRowHeight: DEFAULT_LANE_ROW_HEIGHT },
+    arrangement: {
+      lanes: [],
+      laneRowHeight: DEFAULT_LANE_ROW_HEIGHT,
+      musicalTime: defaultMusicalTime(),
+    },
     activeTrackId: null,
     paletteMode: "pastel",
     padMode: "layer",
@@ -69,6 +75,10 @@ function createInitialState(): SessionState {
     accentColor: DEFAULT_ACCENT_COLOR,
     masterEffects: DEFAULT_MASTER_EFFECTS,
   };
+}
+
+function resolvedMusicalTime(state: SessionState): MusicalTimeSettings {
+  return normalizeMusicalTime(state.arrangement.musicalTime);
 }
 
 type SessionAction =
@@ -118,7 +128,8 @@ type SessionAction =
   | { type: "setLaneMute"; laneId: string; mute: boolean }
   | { type: "setLaneVolume"; laneId: string; volume: number }
   | { type: "setLaneRowHeight"; laneRowHeight: number }
-  | { type: "setLoopRegion"; loopRegion: ArrangementLoopRegion | undefined };
+  | { type: "setLoopRegion"; loopRegion: ArrangementLoopRegion | undefined }
+  | { type: "setMusicalTime"; patch: Partial<MusicalTimeSettings> };
 
 function laneBlockerSegments(
   lane: ArrangementLane,
@@ -336,6 +347,7 @@ function sessionReducer(
       const repeat = Math.max(1, Math.floor(action.repeat ?? 1));
       const match = findChop(state.tracks, action.sourceTrackId, action.chopId);
       if (!match) return state;
+      const musicalTime = resolvedMusicalTime(state);
       const naturalDuration = getChopNaturalDuration(match.chop);
       const playbackDuration = getChopPlaybackDuration(
         naturalDuration,
@@ -343,7 +355,7 @@ function sessionReducer(
       );
       return updateLane(state, action.laneId, (lane) => {
         const newClips = [];
-        let proposedStart = Math.max(0, action.startTime);
+        let proposedStart = snapTime(Math.max(0, action.startTime), musicalTime);
         for (let i = 0; i < repeat; i++) {
           const blockers = [
             ...laneBlockerSegments(lane, state.tracks),
@@ -403,8 +415,9 @@ function sessionReducer(
         const item = resolved.find((r) => r.clip.id === action.clipId);
         if (!item) return lane;
         const blockers = laneBlockerSegments(lane, state.tracks, action.clipId);
+        const musicalTime = resolvedMusicalTime(state);
         const startTime = resolveFreeClipStartTime(
-          action.startTime,
+          snapTime(action.startTime, musicalTime),
           item.playbackDuration,
           item.clip.stackMode ?? "overflow",
           blockers,
@@ -465,6 +478,17 @@ function sessionReducer(
         arrangement: {
           ...state.arrangement,
           loopRegion: action.loopRegion,
+        },
+      };
+    case "setMusicalTime":
+      return {
+        ...state,
+        arrangement: {
+          ...state.arrangement,
+          musicalTime: normalizeMusicalTime({
+            ...resolvedMusicalTime(state),
+            ...action.patch,
+          }),
         },
       };
     default:
@@ -660,6 +684,10 @@ export function useSessionState() {
     dispatch({ type: "setLoopRegion", loopRegion });
   }, []);
 
+  const setMusicalTime = useCallback((patch: Partial<MusicalTimeSettings>) => {
+    dispatch({ type: "setMusicalTime", patch });
+  }, []);
+
   const activeTrack =
     session.tracks.find((t) => t.id === session.activeTrackId) ?? null;
 
@@ -695,5 +723,6 @@ export function useSessionState() {
     setLaneVolume,
     setLaneRowHeight,
     setLoopRegion,
+    setMusicalTime,
   };
 }

@@ -32,6 +32,7 @@ import {
   DEFAULT_LANE_ROW_HEIGHT,
   normalizeLoopRegion,
 } from "./arrangement";
+import { defaultMusicalTime, normalizeMusicalTime } from "./musicalTime";
 
 const DB_NAME = "mpc";
 const DB_VERSION = 1;
@@ -62,6 +63,7 @@ type RawSessionMeta = Partial<SessionState | SavedSessionMetaV1 | SavedSessionMe
     lanes?: Partial<ArrangementLane>[];
     laneRowHeight?: number;
     loopRegion?: Partial<ArrangementLoopRegion>;
+    musicalTime?: Partial<SessionState["arrangement"]["musicalTime"]>;
   };
   activeTrackId?: string | null;
   accentColor?: string;
@@ -109,7 +111,11 @@ function normalizeSavedChops(
 }
 
 function emptyArrangement(): SessionState["arrangement"] {
-  return { lanes: [], laneRowHeight: DEFAULT_LANE_ROW_HEIGHT };
+  return {
+    lanes: [],
+    laneRowHeight: DEFAULT_LANE_ROW_HEIGHT,
+    musicalTime: defaultMusicalTime(),
+  };
 }
 
 function migrateV2ToV3(v2: SavedSessionMetaV2): SessionState {
@@ -322,6 +328,7 @@ function parseV3(parsed: RawSessionMeta): SessionState | null {
         parsed.arrangement?.loopRegion,
         arrangementDuration,
       ),
+      musicalTime: normalizeMusicalTime(parsed.arrangement?.musicalTime),
     },
     activeTrackId: resolveActiveTrackId(parsed, tracks),
     paletteMode,

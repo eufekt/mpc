@@ -9,16 +9,25 @@ import {
   getFreeClipOverlapState,
   playheadLeftPx,
   pxDeltaToTime,
+  pxToTime,
   resolveLaneClips,
   seekTimeFromClientX,
 } from "../lib/arrangement";
-import type { ArrangementLane, Track } from "../lib/types";
+import {
+  CHOP_DRAG_MIME,
+  isChopDragEvent,
+  parseChopDragKey,
+} from "../lib/chopDrag";
+import { beatWidthPx, snapTime } from "../lib/musicalTime";
+import type { ArrangementLane, MusicalTimeSettings, Track } from "../lib/types";
 
 type Props = {
   lane: ArrangementLane;
   tracks: Track[];
   playheadTime: number;
   arrangementDuration: number;
+  pxPerSecond: number;
+  musicalTime: MusicalTimeSettings;
   isSelected: boolean;
   selectedChopKey: string;
   repeatCount: number;
@@ -43,6 +52,11 @@ type Props = {
     clipId: string,
     stackMode: "clamp" | "overflow",
   ) => void;
+  onDropChop: (
+    sourceTrackId: string,
+    chopId: string,
+    startTime: number | null,
+  ) => void;
 };
 
 type DragState = {
@@ -56,6 +70,8 @@ export function ArrangementLaneStrip({
   tracks,
   playheadTime,
   arrangementDuration,
+  pxPerSecond,
+  musicalTime,
   isSelected,
   selectedChopKey,
   repeatCount,
@@ -66,8 +82,10 @@ export function ArrangementLaneStrip({
   onReorderClip,
   onMoveClip,
   onSetClipStackMode,
+  onDropChop,
 }: Props) {
   const [dragState, setDragState] = useState<DragState | null>(null);
+  const [dropActive, setDropActive] = useState(false);
   const didDragRef = useRef(false);
   const stripRef = useRef<HTMLDivElement>(null);
 
@@ -76,11 +94,29 @@ export function ArrangementLaneStrip({
     [lane, tracks],
   );
 
-  const timelineWidthPx = computeTimelineWidthPx(arrangementDuration);
-  const playheadLeft = playheadLeftPx(playheadTime);
+  const timelineWidthPx = computeTimelineWidthPx(arrangementDuration, pxPerSecond);
+  const playheadLeft = playheadLeftPx(playheadTime, pxPerSecond);
+  const toTime = (px: number) => pxToTime(px, pxPerSecond);
   const isFree = lane.mode === "free";
   const placementReady =
     isSelected && isFree && selectedChopKey.length > 0;
+
+  const snap = useCallback(
+    (time: number) => snapTime(time, musicalTime),
+    [musicalTime],
+  );
+
+  const gridStyle = useMemo(() => {
+    const beatPx = beatWidthPx(musicalTime.bpm, pxPerSecond);
+    const barPx = beatPx * musicalTime.beatsPerBar;
+    if (beatPx <= 0) return undefined;
+    return {
+      backgroundImage: [
+        `repeating-linear-gradient(to right, var(--border-faint) 0, var(--border-faint) 1px, transparent 1px, transparent ${beatPx}px)`,
+        `repeating-linear-gradient(to right, var(--border) 0, var(--border) 1px, transparent 1px, transparent ${barPx}px)`,
+      ].join(", "),
+    } as React.CSSProperties;
+  }, [musicalTime.bpm, musicalTime.beatsPerBar, pxPerSecond]);
 
   const handleStripClick = (e: React.MouseEvent<HTMLDivElement>) => {
     onSelectLane(lane.id);
@@ -88,7 +124,7 @@ export function ArrangementLaneStrip({
 
     const strip = stripRef.current;
     if (!strip) return;
-    const time = seekTimeFromClientX(e.clientX, strip);
+    const time = snap(seekTimeFromClientX(e.clientX, strip, toTime));
 
     const placing =
       isFree &&
@@ -132,11 +168,13 @@ export function ArrangementLaneStrip({
       if (Math.abs(deltaPx) > 2) {
         didDragRef.current = true;
       }
-      const deltaTime = pxDeltaToTime(deltaPx);
-      const nextStart = Math.max(0, dragState.initialStartTime + deltaTime);
+      const deltaTime = pxDeltaToTime(deltaPx, pxPerSecond);
+      const nextStart = snap(
+        Math.max(0, dragState.initialStartTime + deltaTime),
+      );
       onMoveClip(lane.id, dragState.clipId, nextStart);
     },
-    [dragState, lane.id, onMoveClip],
+    [dragState, lane.id, onMoveClip, pxPerSecond, snap],
   );
 
   const handleClipPointerUp = useCallback(
@@ -148,19 +186,55 @@ export function ArrangementLaneStrip({
     [dragState],
   );
 
+  const handleDragOver = (event: React.DragEvent<HTMLDivElement>) => {
+    if (!isChopDragEvent(event)) return;
+    event.preventDefault();
+    event.dataTransfer.dropEffect = "copy";
+    setDropActive(true);
+  };
+
+  const handleDragLeave = (event: React.DragEvent<HTMLDivElement>) => {
+    if (event.currentTarget.contains(event.relatedTarget as Node)) return;
+    setDropActive(false);
+  };
+
+  const handleDrop = (event: React.DragEvent<HTMLDivElement>) => {
+    if (!isChopDragEvent(event)) return;
+    event.preventDefault();
+    event.stopPropagation();
+    setDropActive(false);
+    onSelectLane(lane.id);
+    const parsed = parseChopDragKey(event.dataTransfer.getData(CHOP_DRAG_MIME));
+    if (!parsed) return;
+    const strip = stripRef.current;
+    if (!strip) return;
+    if (isFree) {
+      onDropChop(
+        parsed.trackId,
+        parsed.chopId,
+        snap(seekTimeFromClientX(event.clientX, strip, toTime)),
+      );
+    } else {
+      onDropChop(parsed.trackId, parsed.chopId, null);
+    }
+  };
+
   return (
     <div
       className={`arrangement-lane-strip-row${isSelected ? " selected" : ""}`}
     >
         <div
           ref={stripRef}
-          className={`arrangement-clip-strip${placementReady ? " placement-ready" : " seekable"}`}
-        style={{ width: `${timelineWidthPx}px` }}
+          className={`arrangement-clip-strip${placementReady ? " placement-ready" : " seekable"}${dropActive ? " drop-active" : ""}`}
+        style={{ width: `${timelineWidthPx}px`, ...gridStyle }}
         onClick={handleStripClick}
+        onDragOver={handleDragOver}
+        onDragLeave={handleDragLeave}
+        onDrop={handleDrop}
       >
         {resolvedClips.map((item, index) => {
           const label = `${item.chopIndex + 1}`;
-          const leftPx = getClipLeftPx(lane, resolvedClips, index);
+          const leftPx = getClipLeftPx(lane, resolvedClips, index, pxPerSecond);
           const startTime = isFree
             ? item.clip.startTime
             : resolvedClips
@@ -186,7 +260,7 @@ export function ArrangementLaneStrip({
               className={`arrangement-clip${isFree ? " draggable" : ""}${overlapClass}`}
               style={{
                 backgroundColor: item.chop.color,
-                width: `${clipWidthPx(item.playbackDuration)}px`,
+                width: `${clipWidthPx(item.playbackDuration, pxPerSecond)}px`,
                 left: `${leftPx}px`,
                 zIndex: isFree ? index + 1 : undefined,
               }}

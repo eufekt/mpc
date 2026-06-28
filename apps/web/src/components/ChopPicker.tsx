@@ -6,6 +6,10 @@ import {
   getChopOptionId,
   type ChopOption,
 } from "../lib/arrangement";
+import {
+  CHOP_DRAG_MIME,
+  encodeChopDragKey,
+} from "../lib/chopDrag";
 
 type Props = {
   options: ChopOption[];
@@ -34,8 +38,16 @@ export function ChopPicker({ options, selectedKey, onSelect }: Props) {
             role="option"
             aria-selected={isSelected}
             className={`chop-picker-item${isSelected ? " selected" : ""}`}
+            draggable
+            onDragStart={(event) => {
+              event.dataTransfer.setData(
+                CHOP_DRAG_MIME,
+                encodeChopDragKey(option.sourceTrackId, option.chopId),
+              );
+              event.dataTransfer.effectAllowed = "copy";
+            }}
             onClick={() => onSelect(isSelected ? "" : id)}
-            title={formatChopSummary(option)}
+            title={`${formatChopSummary(option)} — drag to lane`}
           >
             <span
               className="chop-picker-swatch"
