@@ -26,7 +26,7 @@ import type {
 import { createTrackId } from "../lib/trackIds";
 import { DEFAULT_ACCENT_COLOR } from "../lib/transport";
 import { DEFAULT_MASTER_EFFECTS, normalizeMasterEffects, type MasterEffects } from "../lib/masterEffects";
-import { defaultMusicalTime, normalizeMusicalTime, snapTime } from "../lib/musicalTime";
+import { defaultMusicalTime, normalizeMusicalTime, normalizeLoopBeats, snapTime } from "../lib/musicalTime";
 
 export function createTrack(
   params: Pick<Track, "sourceType" | "sourceName" | "name"> & {
@@ -66,6 +66,7 @@ function createInitialState(): SessionState {
     arrangement: {
       lanes: [],
       laneRowHeight: DEFAULT_LANE_ROW_HEIGHT,
+      loopBeats: normalizeLoopBeats(undefined),
       musicalTime: defaultMusicalTime(),
     },
     activeTrackId: null,
@@ -130,6 +131,7 @@ type SessionAction =
   | { type: "setLaneVolume"; laneId: string; volume: number }
   | { type: "setLaneRowHeight"; laneRowHeight: number }
   | { type: "setLoopRegion"; loopRegion: ArrangementLoopRegion | undefined }
+  | { type: "setLoopBeats"; loopBeats: number }
   | { type: "setMusicalTime"; patch: Partial<MusicalTimeSettings> };
 
 function laneBlockerSegments(
@@ -512,6 +514,15 @@ function sessionReducer(
           loopRegion: action.loopRegion,
         },
       };
+    case "setLoopBeats":
+      return {
+        ...state,
+        arrangement: {
+          ...state.arrangement,
+          loopBeats: normalizeLoopBeats(action.loopBeats),
+          loopRegion: undefined,
+        },
+      };
     case "setMusicalTime":
       return {
         ...state,
@@ -725,6 +736,10 @@ export function useSessionState() {
     dispatch({ type: "setLoopRegion", loopRegion });
   }, []);
 
+  const setLoopBeats = useCallback((loopBeats: number) => {
+    dispatch({ type: "setLoopBeats", loopBeats });
+  }, []);
+
   const setMusicalTime = useCallback((patch: Partial<MusicalTimeSettings>) => {
     dispatch({ type: "setMusicalTime", patch });
   }, []);
@@ -765,6 +780,7 @@ export function useSessionState() {
     setLaneVolume,
     setLaneRowHeight,
     setLoopRegion,
+    setLoopBeats,
     setMusicalTime,
   };
 }

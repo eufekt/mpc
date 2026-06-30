@@ -120,14 +120,32 @@ export type ArrangementLoopBounds = {
 
 export const MIN_LOOP_REGION_SECONDS = 0.25;
 
+export type ResolveLoopBoundsOptions = {
+  loopBeats?: number;
+  bpm?: number;
+};
+
 export function resolveLoopBounds(
   loopRegion: ArrangementLoopBounds | null | undefined,
   arrangementDuration: number,
+  options?: ResolveLoopBoundsOptions,
 ): ArrangementLoopBounds {
   const duration = Math.max(0, arrangementDuration);
   if (duration <= 0) return { start: 0, end: 0 };
 
   if (!loopRegion) {
+    const loopBeats = options?.loopBeats;
+    const bpm = options?.bpm;
+    if (
+      typeof loopBeats === "number" &&
+      loopBeats > 0 &&
+      typeof bpm === "number" &&
+      bpm > 0
+    ) {
+      const beatEnd = (loopBeats * 60) / bpm;
+      const end = Math.min(duration, Math.max(beatEnd, MIN_LOOP_REGION_SECONDS));
+      return { start: 0, end };
+    }
     return { start: 0, end: duration };
   }
 

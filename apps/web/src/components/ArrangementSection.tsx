@@ -22,6 +22,7 @@ import {
 import {
   clampBpm,
   defaultMusicalTime,
+  LOOP_BEAT_OPTIONS,
   normalizeMusicalTime,
   SNAP_DIVISIONS,
   snapDivisionLabel,
@@ -88,6 +89,7 @@ type Props = {
   playheadTime: number;
   loop: boolean;
   loopRegion: LoopRegion | undefined;
+  loopBeats: number;
   musicalTime?: MusicalTimeSettings;
   onMusicalTimeChange: (patch: Partial<MusicalTimeSettings>) => void;
   transportFocused: boolean;
@@ -97,6 +99,7 @@ type Props = {
   onSeek: (time: number) => void;
   onLoopChange: (loop: boolean) => void;
   onLoopRegionChange: (region: LoopRegion) => void;
+  onLoopBeatsChange: (beats: number) => void;
   onAddLane: (draft: LaneDraft) => void;
   laneRowHeight: number;
   onLaneRowHeightChange: (height: number) => void;
@@ -119,6 +122,7 @@ export function ArrangementSection({
   playheadTime,
   loop,
   loopRegion,
+  loopBeats,
   musicalTime: musicalTimeProp,
   onMusicalTimeChange,
   transportFocused,
@@ -128,6 +132,7 @@ export function ArrangementSection({
   onSeek,
   onLoopChange,
   onLoopRegionChange,
+  onLoopBeatsChange,
   onAddLane,
   laneRowHeight,
   onLaneRowHeightChange,
@@ -359,6 +364,20 @@ export function ArrangementSection({
           >
             LOOP
           </button>
+          <div className="arrangement-loop-beats">
+            <span>BEATS</span>
+            {LOOP_BEAT_OPTIONS.map((beats) => (
+              <button
+                key={beats}
+                type="button"
+                className={loopBeats === beats ? "active" : undefined}
+                onClick={() => onLoopBeatsChange(beats)}
+                title={`Loop ${beats} beat${beats === 1 ? "" : "s"}`}
+              >
+                {beats}
+              </button>
+            ))}
+          </div>
           <span className="arrangement-duration">
             {formatDuration(arrangementDuration)}
           </span>
@@ -591,6 +610,7 @@ export function ArrangementSection({
                     </div>
                     <ArrangementLoopRegion
                       loopRegion={loopRegion}
+                      loopBeats={loopBeats}
                       arrangementDuration={arrangementDuration}
                       pxPerSecond={pxPerSecond}
                       topPx={loopRegionTopPx}

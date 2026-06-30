@@ -16,6 +16,7 @@ import type {
 
 type Props = {
   loopRegion: LoopRegion | null | undefined;
+  loopBeats: number;
   arrangementDuration: number;
   pxPerSecond: number;
   topPx: number;
@@ -27,6 +28,7 @@ type Props = {
 
 export function ArrangementLoopRegion({
   loopRegion,
+  loopBeats,
   arrangementDuration,
   pxPerSecond,
   topPx,
@@ -35,7 +37,10 @@ export function ArrangementLoopRegion({
   musicalTime,
   onChange,
 }: Props) {
-  const resolvedRegion = resolveLoopBounds(loopRegion, arrangementDuration);
+  const resolvedRegion = resolveLoopBounds(loopRegion, arrangementDuration, {
+    loopBeats,
+    bpm: musicalTime?.bpm,
+  });
   const dragRef = useRef<{
     edge: "start" | "end";
     initialRegion: LoopRegion;

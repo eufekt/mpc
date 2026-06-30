@@ -33,7 +33,7 @@ import { useUiScale } from "./hooks/useUiScale";
 import { useProjects } from "./hooks/useProjects";
 import { createTrack, createArrangementLane, useSessionState } from "./hooks/useSessionState";
 import { filterLoadedTracks, computeArrangementDuration } from "./lib/arrangement";
-import { normalizeMusicalTime, snapTime } from "./lib/musicalTime";
+import { normalizeLoopBeats, normalizeMusicalTime, snapTime } from "./lib/musicalTime";
 import type { PaletteMode } from "./lib/chopColors";
 import { isTypingTarget } from "./lib/keyboard";
 import {
@@ -124,6 +124,7 @@ export default function App() {
     setLaneVolume,
     setLaneRowHeight,
     setLoopRegion,
+    setLoopBeats,
     setMusicalTime,
   } = useSessionState();
 
@@ -151,6 +152,7 @@ export default function App() {
     tracks: session.tracks,
     loadedTrackIds: engine.loadedTrackIds,
     loopRegion: session.arrangement.loopRegion,
+    loopBeats: normalizeLoopBeats(session.arrangement.loopBeats),
     musicalTime: normalizeMusicalTime(session.arrangement.musicalTime),
     getBuffer: (trackId) => engine.getBuffer(trackId) ?? undefined,
     getContext: engine.getContext,
@@ -1224,6 +1226,7 @@ export default function App() {
                   playheadTime={playheadTime}
                   loop={arrangementPlayer.loop}
                   loopRegion={session.arrangement.loopRegion}
+                  loopBeats={normalizeLoopBeats(session.arrangement.loopBeats)}
                   musicalTime={session.arrangement.musicalTime}
                   onMusicalTimeChange={setMusicalTime}
                   transportFocused={transportFocus.type === "arrangement"}
@@ -1233,6 +1236,7 @@ export default function App() {
                   onSeek={arrangementPlayer.setSeekTime}
                   onLoopChange={arrangementPlayer.setLoop}
                   onLoopRegionChange={setLoopRegion}
+                  onLoopBeatsChange={setLoopBeats}
                   onAddLane={(draft) => {
                     addLane({
                       ...createArrangementLane(draft.name),

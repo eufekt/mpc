@@ -77,8 +77,10 @@ export type ArrangementState = {
   lanes: ArrangementLane[];
   /** Pixel height of each timeline lane row (saved workspace preference). */
   laneRowHeight: number;
-  /** Loop bounds when arrangement loop is enabled — omit for full-length loop. */
+  /** Loop bounds when arrangement loop is enabled — omit to use loopBeats from start. */
   loopRegion?: ArrangementLoopRegion;
+  /** How many beats to loop when loopRegion is unset — default 16 (4 bars in 4/4). */
+  loopBeats?: number;
   musicalTime?: MusicalTimeSettings;
 };
 

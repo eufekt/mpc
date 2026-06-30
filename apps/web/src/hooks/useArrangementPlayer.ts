@@ -58,6 +58,7 @@ type Params = {
   tracks: Track[];
   loadedTrackIds: string[];
   loopRegion: ArrangementLoopRegion | null | undefined;
+  loopBeats: number;
   musicalTime: MusicalTimeSettings;
   getBuffer: (trackId: string) => AudioBuffer | undefined;
   getContext: () => AudioContext;
@@ -277,6 +278,7 @@ export function useArrangementPlayer({
   tracks,
   loadedTrackIds,
   loopRegion,
+  loopBeats,
   musicalTime,
   getBuffer,
   getContext,
@@ -566,7 +568,10 @@ export function useArrangementPlayer({
       const duration = computeArrangementDuration(lanes, playable);
       if (duration <= 0) return;
 
-      const bounds = resolveLoopBounds(loopRegion, duration);
+      const bounds = resolveLoopBounds(loopRegion, duration, {
+        loopBeats,
+        bpm: musicalTime.bpm,
+      });
       loopBoundsRef.current = bounds;
 
       let startAt = Math.max(
@@ -639,6 +644,7 @@ export function useArrangementPlayer({
       playableTracks,
       tracks,
       loopRegion,
+      loopBeats,
       musicalTime,
     ],
   );

@@ -4,6 +4,12 @@ export const MIN_BPM = 40;
 export const MAX_BPM = 240;
 export const DEFAULT_BPM = 90;
 export const DEFAULT_BEATS_PER_BAR = 4;
+export const DEFAULT_LOOP_BEATS = 16;
+export const MIN_LOOP_BEATS = 1;
+export const MAX_LOOP_BEATS = 128;
+
+export const LOOP_BEAT_OPTIONS = [1, 2, 4, 8, 16, 32] as const;
+export type LoopBeatOption = (typeof LOOP_BEAT_OPTIONS)[number];
 
 export function defaultMusicalTime(): MusicalTimeSettings {
   return {
@@ -25,6 +31,22 @@ export function secondsPerBeat(bpm: number): number {
 
 export function secondsPerBar(bpm: number, beatsPerBar: number): number {
   return secondsPerBeat(bpm) * beatsPerBar;
+}
+
+export function clampLoopBeats(beats: number): number {
+  return Math.max(MIN_LOOP_BEATS, Math.min(MAX_LOOP_BEATS, Math.round(beats)));
+}
+
+export function loopDurationSeconds(loopBeats: number, bpm: number): number {
+  return clampLoopBeats(loopBeats) * secondsPerBeat(bpm);
+}
+
+export function normalizeLoopBeats(
+  raw: number | null | undefined,
+  fallback = DEFAULT_LOOP_BEATS,
+): number {
+  if (typeof raw !== "number" || !Number.isFinite(raw)) return fallback;
+  return clampLoopBeats(raw);
 }
 
 export const SNAP_DIVISIONS = [4, 8, 16, 32, 64, 128] as const satisfies readonly SnapDivision[];
