@@ -1,4 +1,9 @@
-import type { MusicalTimeSettings, SnapDivision } from "./types";
+import type {
+  ArrangementLoopMode,
+  LoopEdgeSnap,
+  MusicalTimeSettings,
+  SnapDivision,
+} from "./types";
 
 export const MIN_BPM = 40;
 export const MAX_BPM = 240;
@@ -10,6 +15,23 @@ export const MAX_LOOP_BEATS = 128;
 
 export const LOOP_BEAT_OPTIONS = [1, 2, 4, 8, 16, 32] as const;
 export type LoopBeatOption = (typeof LOOP_BEAT_OPTIONS)[number];
+
+export const DEFAULT_LOOP_MODE = "region" as const;
+export const LOOP_EDGE_SNAP_OPTIONS = ["off", "beat", "bar"] as const satisfies readonly LoopEdgeSnap[];
+
+export function normalizeLoopMode(
+  raw: ArrangementLoopMode | null | undefined,
+): ArrangementLoopMode {
+  if (raw === "region" || raw === "content" || raw === "beats") return raw;
+  return DEFAULT_LOOP_MODE;
+}
+
+export function normalizeLoopEdgeSnap(
+  raw: LoopEdgeSnap | null | undefined,
+): LoopEdgeSnap {
+  if (raw === "off" || raw === "beat" || raw === "bar") return raw;
+  return "off";
+}
 
 export function defaultMusicalTime(): MusicalTimeSettings {
   return {
@@ -39,6 +61,36 @@ export function clampLoopBeats(beats: number): number {
 
 export function loopDurationSeconds(loopBeats: number, bpm: number): number {
   return clampLoopBeats(loopBeats) * secondsPerBeat(bpm);
+}
+
+export function beatsFromSeconds(seconds: number, bpm: number): number {
+  if (bpm <= 0) return 0;
+  return (Math.max(0, seconds) * bpm) / 60;
+}
+
+export function formatLoopBeatLength(seconds: number, bpm: number): string {
+  const beats = beatsFromSeconds(seconds, bpm);
+  const beatsLabel =
+    Math.abs(beats - Math.round(beats)) < 0.05
+      ? String(Math.round(beats))
+      : beats.toFixed(1);
+  return `${beatsLabel} beats`;
+}
+
+export function snapLoopEdgeTime(
+  seconds: number,
+  loopEdgeSnap: LoopEdgeSnap,
+  settings: MusicalTimeSettings,
+): number {
+  if (loopEdgeSnap === "off") return Math.max(0, seconds);
+  if (loopEdgeSnap === "beat") {
+    const step = secondsPerBeat(settings.bpm);
+    if (step <= 0) return Math.max(0, seconds);
+    return Math.max(0, Math.round(seconds / step) * step);
+  }
+  const step = secondsPerBar(settings.bpm, settings.beatsPerBar);
+  if (step <= 0) return Math.max(0, seconds);
+  return Math.max(0, Math.round(seconds / step) * step);
 }
 
 export function normalizeLoopBeats(

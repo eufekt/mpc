@@ -60,6 +60,12 @@ export type ArrangementLoopRegion = {
   end: number;
 };
 
+/** How arrangement loop bounds are chosen when LOOP is enabled. */
+export type ArrangementLoopMode = "region" | "content" | "beats";
+
+/** Snap loop region handles to the grid — off keeps sample-accurate phrase lengths. */
+export type LoopEdgeSnap = "off" | "beat" | "bar";
+
 export type SnapDivision = 4 | 8 | 16 | 32 | 64 | 128;
 
 export type MusicalTimeSettings = {
@@ -77,10 +83,14 @@ export type ArrangementState = {
   lanes: ArrangementLane[];
   /** Pixel height of each timeline lane row (saved workspace preference). */
   laneRowHeight: number;
-  /** Loop bounds when arrangement loop is enabled — omit to use loopBeats from start. */
+  /** Loop bounds in region mode — omit to fall back to content length. */
   loopRegion?: ArrangementLoopRegion;
-  /** How many beats to loop when loopRegion is unset — default 16 (4 bars in 4/4). */
+  /** Region = custom loop points; content = all placed clips; beats = grid length from start. */
+  loopMode?: ArrangementLoopMode;
+  /** Grid loop length when loopMode is beats — default 16 (4 bars in 4/4). */
   loopBeats?: number;
+  /** Snap loop region handles — default off for phrase-accurate loops. */
+  loopEdgeSnap?: LoopEdgeSnap;
   musicalTime?: MusicalTimeSettings;
 };
 
