@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   clampLaneRowHeight,
+  computeArrangementContentBounds,
   computeArrangementDuration,
   computeTimelineLaneAreaHeight,
   computeTimelineScrollDuration,
@@ -22,6 +23,8 @@ import {
 import {
   clampBpm,
   defaultMusicalTime,
+  LOOP_BEAT_OPTIONS,
+  LOOP_EDGE_SNAP_OPTIONS,
   normalizeMusicalTime,
   SNAP_DIVISIONS,
   snapDivisionLabel,
@@ -30,7 +33,9 @@ import type {
   ArrangementClipStackMode,
   ArrangementLane,
   ArrangementLaneMode,
+  ArrangementLoopMode,
   ArrangementLoopRegion as LoopRegion,
+  LoopEdgeSnap,
   MusicalTimeSettings,
   SnapDivision,
   Track,
@@ -88,6 +93,9 @@ type Props = {
   playheadTime: number;
   loop: boolean;
   loopRegion: LoopRegion | undefined;
+  loopMode: ArrangementLoopMode;
+  loopBeats: number;
+  loopEdgeSnap: LoopEdgeSnap;
   musicalTime?: MusicalTimeSettings;
   onMusicalTimeChange: (patch: Partial<MusicalTimeSettings>) => void;
   transportFocused: boolean;
@@ -97,6 +105,9 @@ type Props = {
   onSeek: (time: number) => void;
   onLoopChange: (loop: boolean) => void;
   onLoopRegionChange: (region: LoopRegion) => void;
+  onLoopModeChange: (mode: ArrangementLoopMode) => void;
+  onLoopBeatsChange: (beats: number) => void;
+  onLoopEdgeSnapChange: (snap: LoopEdgeSnap) => void;
   onAddLane: (draft: LaneDraft) => void;
   laneRowHeight: number;
   onLaneRowHeightChange: (height: number) => void;
@@ -119,6 +130,9 @@ export function ArrangementSection({
   playheadTime,
   loop,
   loopRegion,
+  loopMode,
+  loopBeats,
+  loopEdgeSnap,
   musicalTime: musicalTimeProp,
   onMusicalTimeChange,
   transportFocused,
@@ -128,6 +142,9 @@ export function ArrangementSection({
   onSeek,
   onLoopChange,
   onLoopRegionChange,
+  onLoopModeChange,
+  onLoopBeatsChange,
+  onLoopEdgeSnapChange,
   onAddLane,
   laneRowHeight,
   onLaneRowHeightChange,
@@ -229,6 +246,29 @@ export function ArrangementSection({
     () => computeArrangementDuration(lanes, loadedTracks),
     [lanes, loadedTracks],
   );
+
+  const contentBounds = useMemo(
+    () => computeArrangementContentBounds(lanes, loadedTracks),
+    [lanes, loadedTracks],
+  );
+
+  const contentDuration = contentBounds
+    ? contentBounds.end - contentBounds.start
+    : 0;
+
+  const handleLoopRegionChange = useCallback(
+    (region: LoopRegion) => {
+      onLoopRegionChange(region);
+    },
+    [onLoopRegionChange],
+  );
+
+  const handleFitLoopToContent = useCallback(() => {
+    const bounds = computeArrangementContentBounds(lanes, loadedTracks);
+    if (!bounds) return;
+    onLoopModeChange("region");
+    onLoopRegionChange(bounds);
+  }, [lanes, loadedTracks, onLoopModeChange, onLoopRegionChange]);
 
   const loopRegionHeightPx = lanes.length * laneRowHeight;
   const loopRegionTopPx = ARRANGEMENT_RULER_HEIGHT;
@@ -359,6 +399,88 @@ export function ArrangementSection({
           >
             LOOP
           </button>
+          <div className="arrangement-loop-controls">
+            <div className="arrangement-loop-mode">
+              <span>MODE</span>
+              {(["region", "content", "beats"] as const).map((mode) => (
+                <button
+                  key={mode}
+                  type="button"
+                  className={loopMode === mode ? "active" : undefined}
+                  onClick={() => onLoopModeChange(mode)}
+                  title={
+                    mode === "region"
+                      ? "Custom loop region — drag the ruler or use Fit"
+                      : mode === "content"
+                        ? "Loop all placed clips including gaps"
+                        : "Grid-aligned loop from the start"
+                  }
+                >
+                  {mode === "region"
+                    ? "REGION"
+                    : mode === "content"
+                      ? "CONTENT"
+                      : "BEATS"}
+                </button>
+              ))}
+            </div>
+            {loopMode === "region" && (
+              <>
+                <button
+                  type="button"
+                  onClick={handleFitLoopToContent}
+                  disabled={contentDuration <= 0}
+                  title="Set loop region to span all placed clips"
+                >
+                  FIT
+                </button>
+                <span className="arrangement-loop-hint">
+                  drag ruler to set loop
+                </span>
+                <div className="arrangement-loop-edge-snap">
+                  <span>SNAP</span>
+                  {LOOP_EDGE_SNAP_OPTIONS.map((snap) => (
+                    <button
+                      key={snap}
+                      type="button"
+                      className={loopEdgeSnap === snap ? "active" : undefined}
+                      onClick={() => onLoopEdgeSnapChange(snap)}
+                      title={
+                        snap === "off"
+                          ? "Sample-accurate loop edges"
+                          : snap === "beat"
+                            ? "Snap loop edges to beats"
+                            : "Snap loop edges to bars"
+                      }
+                    >
+                      {snap.toUpperCase()}
+                    </button>
+                  ))}
+                </div>
+              </>
+            )}
+            {loopMode === "content" && (
+              <span className="arrangement-loop-hint">
+                loops all clips and gaps between them
+              </span>
+            )}
+            {loopMode === "beats" && (
+              <div className="arrangement-loop-beats">
+                <span>GRID</span>
+                {LOOP_BEAT_OPTIONS.map((beats) => (
+                  <button
+                    key={beats}
+                    type="button"
+                    className={loopBeats === beats ? "active" : undefined}
+                    onClick={() => onLoopBeatsChange(beats)}
+                    title={`Loop ${beats} beat${beats === 1 ? "" : "s"} from start`}
+                  >
+                    {beats}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
           <span className="arrangement-duration">
             {formatDuration(arrangementDuration)}
           </span>
@@ -555,8 +677,11 @@ export function ArrangementSection({
                       arrangementDuration={arrangementDuration}
                       pxPerSecond={pxPerSecond}
                       musicalTime={musicalTime}
+                      loopEdgeSnap={loopEdgeSnap}
                       onSeek={onSeek}
-                      onLoopRegionChange={onLoopRegionChange}
+                      onLoopRegionChange={
+                        loopMode === "region" ? handleLoopRegionChange : undefined
+                      }
                     />
                     <div className="arrangement-lane-strips">
                       {lanes.map((lane) => (
@@ -591,13 +716,17 @@ export function ArrangementSection({
                     </div>
                     <ArrangementLoopRegion
                       loopRegion={loopRegion}
+                      loopMode={loopMode}
+                      loopBeats={loopBeats}
+                      loopEdgeSnap={loopEdgeSnap}
+                      contentBounds={contentBounds}
                       arrangementDuration={arrangementDuration}
                       pxPerSecond={pxPerSecond}
                       topPx={loopRegionTopPx}
                       heightPx={loopRegionHeightPx}
                       loopEnabled={loop}
                       musicalTime={musicalTime}
-                      onChange={onLoopRegionChange}
+                      onChange={handleLoopRegionChange}
                     />
                   </div>
                 </div>

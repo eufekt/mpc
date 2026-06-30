@@ -33,7 +33,7 @@ import { useUiScale } from "./hooks/useUiScale";
 import { useProjects } from "./hooks/useProjects";
 import { createTrack, createArrangementLane, useSessionState } from "./hooks/useSessionState";
 import { filterLoadedTracks, computeArrangementDuration } from "./lib/arrangement";
-import { normalizeMusicalTime, snapTime } from "./lib/musicalTime";
+import { normalizeLoopBeats, normalizeLoopEdgeSnap, normalizeLoopMode, normalizeMusicalTime, snapTime } from "./lib/musicalTime";
 import type { PaletteMode } from "./lib/chopColors";
 import { isTypingTarget } from "./lib/keyboard";
 import {
@@ -124,6 +124,9 @@ export default function App() {
     setLaneVolume,
     setLaneRowHeight,
     setLoopRegion,
+    setLoopMode,
+    setLoopBeats,
+    setLoopEdgeSnap,
     setMusicalTime,
   } = useSessionState();
 
@@ -151,6 +154,8 @@ export default function App() {
     tracks: session.tracks,
     loadedTrackIds: engine.loadedTrackIds,
     loopRegion: session.arrangement.loopRegion,
+    loopMode: normalizeLoopMode(session.arrangement.loopMode),
+    loopBeats: normalizeLoopBeats(session.arrangement.loopBeats),
     musicalTime: normalizeMusicalTime(session.arrangement.musicalTime),
     getBuffer: (trackId) => engine.getBuffer(trackId) ?? undefined,
     getContext: engine.getContext,
@@ -1224,6 +1229,9 @@ export default function App() {
                   playheadTime={playheadTime}
                   loop={arrangementPlayer.loop}
                   loopRegion={session.arrangement.loopRegion}
+                  loopMode={normalizeLoopMode(session.arrangement.loopMode)}
+                  loopBeats={normalizeLoopBeats(session.arrangement.loopBeats)}
+                  loopEdgeSnap={normalizeLoopEdgeSnap(session.arrangement.loopEdgeSnap)}
                   musicalTime={session.arrangement.musicalTime}
                   onMusicalTimeChange={setMusicalTime}
                   transportFocused={transportFocus.type === "arrangement"}
@@ -1233,6 +1241,9 @@ export default function App() {
                   onSeek={arrangementPlayer.setSeekTime}
                   onLoopChange={arrangementPlayer.setLoop}
                   onLoopRegionChange={setLoopRegion}
+                  onLoopModeChange={setLoopMode}
+                  onLoopBeatsChange={setLoopBeats}
+                  onLoopEdgeSnapChange={setLoopEdgeSnap}
                   onAddLane={(draft) => {
                     addLane({
                       ...createArrangementLane(draft.name),

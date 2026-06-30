@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { stopSource } from "../lib/audioUtils";
 import {
   computeArrangementDuration,
+  computeArrangementContentBounds,
   filterLoadedTracks,
   getClipStartTime,
   getFreeClipAudibleSegments,
@@ -15,6 +16,7 @@ import { createChopEffectsInsert, normalizeMasterEffects } from "../lib/masterEf
 import { secondsPerBeat } from "../lib/musicalTime";
 import type {
   ArrangementLane,
+  ArrangementLoopMode,
   ArrangementLoopRegion,
   MusicalTimeSettings,
   Track,
@@ -58,6 +60,8 @@ type Params = {
   tracks: Track[];
   loadedTrackIds: string[];
   loopRegion: ArrangementLoopRegion | null | undefined;
+  loopMode: ArrangementLoopMode;
+  loopBeats: number;
   musicalTime: MusicalTimeSettings;
   getBuffer: (trackId: string) => AudioBuffer | undefined;
   getContext: () => AudioContext;
@@ -277,6 +281,8 @@ export function useArrangementPlayer({
   tracks,
   loadedTrackIds,
   loopRegion,
+  loopMode,
+  loopBeats,
   musicalTime,
   getBuffer,
   getContext,
@@ -566,7 +572,12 @@ export function useArrangementPlayer({
       const duration = computeArrangementDuration(lanes, playable);
       if (duration <= 0) return;
 
-      const bounds = resolveLoopBounds(loopRegion, duration);
+      const bounds = resolveLoopBounds(loopRegion, duration, {
+        loopMode,
+        loopBeats,
+        bpm: musicalTime.bpm,
+        contentBounds: computeArrangementContentBounds(lanes, playable),
+      });
       loopBoundsRef.current = bounds;
 
       let startAt = Math.max(
@@ -639,6 +650,8 @@ export function useArrangementPlayer({
       playableTracks,
       tracks,
       loopRegion,
+      loopMode,
+      loopBeats,
       musicalTime,
     ],
   );

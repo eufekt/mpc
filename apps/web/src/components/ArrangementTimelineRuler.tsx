@@ -9,16 +9,22 @@ import {
 import {
   beatTimesInRange,
   isBarBoundary,
+  snapLoopEdgeTime,
   snapTime,
   timeToBarBeat,
 } from "../lib/musicalTime";
-import type { ArrangementLoopRegion, MusicalTimeSettings } from "../lib/types";
+import type {
+  ArrangementLoopRegion,
+  LoopEdgeSnap,
+  MusicalTimeSettings,
+} from "../lib/types";
 
 type Props = {
   duration: number;
   arrangementDuration: number;
   pxPerSecond: number;
   musicalTime: MusicalTimeSettings;
+  loopEdgeSnap: LoopEdgeSnap;
   onSeek: (time: number) => void;
   onLoopRegionChange?: (region: ArrangementLoopRegion) => void;
 };
@@ -30,6 +36,7 @@ export function ArrangementTimelineRuler({
   arrangementDuration,
   pxPerSecond,
   musicalTime,
+  loopEdgeSnap,
   onSeek,
   onLoopRegionChange,
 }: Props) {
@@ -37,9 +44,19 @@ export function ArrangementTimelineRuler({
   const toTime = (px: number) => pxToTime(px, pxPerSecond);
   const toPx = (time: number) => timeToPx(time, pxPerSecond);
 
-  const applySnap = useCallback(
+  const applySeekSnap = useCallback(
     (time: number) => snapTime(time, musicalTime),
     [musicalTime],
+  );
+
+  const applyLoopSnap = useCallback(
+    (time: number) => {
+      if (loopEdgeSnap !== "off") {
+        return snapLoopEdgeTime(time, loopEdgeSnap, musicalTime);
+      }
+      return applySeekSnap(time);
+    },
+    [applySeekSnap, loopEdgeSnap, musicalTime],
   );
 
   const ticks = useMemo(() => {
@@ -66,7 +83,7 @@ export function ArrangementTimelineRuler({
       if (event.button !== 0 || !onLoopRegionChange) return;
       const ruler = event.currentTarget;
       ruler.setPointerCapture(event.pointerId);
-      const anchorTime = applySnap(
+      const anchorTime = applyLoopSnap(
         seekTimeFromClientX(event.clientX, ruler, toTime),
       );
       const anchorClientX = event.clientX;
@@ -80,7 +97,7 @@ export function ArrangementTimelineRuler({
           return;
         }
         selecting = true;
-        const time = applySnap(seekTimeFromClientX(ev.clientX, ruler, toTime));
+        const time = applyLoopSnap(seekTimeFromClientX(ev.clientX, ruler, toTime));
         const start = Math.min(drag.anchorTime, time);
         const end = Math.max(drag.anchorTime, time);
         const preview = normalizeLoopRegion(
@@ -100,7 +117,7 @@ export function ArrangementTimelineRuler({
         if (selecting && selectPreviewRef.current && onLoopRegionChange) {
           onLoopRegionChange(selectPreviewRef.current);
         } else if (!selecting) {
-          onSeek(applySnap(seekTimeFromClientX(ev.clientX, ruler, toTime)));
+          onSeek(applySeekSnap(seekTimeFromClientX(ev.clientX, ruler, toTime)));
         }
         selectPreviewRef.current = null;
         setSelectPreview(null);
@@ -109,12 +126,12 @@ export function ArrangementTimelineRuler({
       window.addEventListener("pointermove", onMove);
       window.addEventListener("pointerup", onUp);
     },
-    [applySnap, arrangementDuration, onLoopRegionChange, onSeek, toTime],
+    [applyLoopSnap, applySeekSnap, arrangementDuration, onLoopRegionChange, onSeek, toTime],
   );
 
   const handleClick = (e: React.MouseEvent<HTMLDivElement>) => {
     if (!onLoopRegionChange) {
-      onSeek(applySnap(seekTimeFromClientX(e.clientX, e.currentTarget, toTime)));
+      onSeek(applySeekSnap(seekTimeFromClientX(e.clientX, e.currentTarget, toTime)));
     }
   };
 

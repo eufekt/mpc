@@ -3,6 +3,7 @@ import type {
   ArrangementClip,
   ArrangementClipStackMode,
   ArrangementLane,
+  ArrangementLoopMode,
   Chop,
   Track,
 } from "./types";
@@ -120,23 +121,79 @@ export type ArrangementLoopBounds = {
 
 export const MIN_LOOP_REGION_SECONDS = 0.25;
 
+export type ResolveLoopBoundsOptions = {
+  loopMode?: ArrangementLoopMode;
+  loopBeats?: number;
+  bpm?: number;
+  /** Span of placed clips — gaps between clips are included. */
+  contentBounds?: ArrangementLoopBounds | null;
+};
+
+function clampLoopBounds(
+  start: number,
+  end: number,
+  duration: number,
+): ArrangementLoopBounds {
+  const clampedStart = Math.max(0, Math.min(start, duration));
+  let clampedEnd = Math.max(clampedStart, Math.min(end, duration));
+  if (clampedEnd - clampedStart < MIN_LOOP_REGION_SECONDS) {
+    clampedEnd = Math.min(duration, clampedStart + MIN_LOOP_REGION_SECONDS);
+  }
+  return { start: clampedStart, end: clampedEnd };
+}
+
 export function resolveLoopBounds(
   loopRegion: ArrangementLoopBounds | null | undefined,
   arrangementDuration: number,
+  options?: ResolveLoopBoundsOptions,
 ): ArrangementLoopBounds {
   const duration = Math.max(0, arrangementDuration);
   if (duration <= 0) return { start: 0, end: 0 };
 
-  if (!loopRegion) {
-    return { start: 0, end: duration };
+  const mode = options?.loopMode ?? "region";
+  const contentBounds = options?.contentBounds ?? null;
+  const contentEnd = contentBounds
+    ? Math.min(duration, Math.max(0, contentBounds.end))
+    : duration;
+  const contentStart = contentBounds
+    ? Math.max(0, Math.min(contentBounds.start, contentEnd))
+    : 0;
+
+  if (mode === "beats") {
+    const loopBeats = options?.loopBeats;
+    const bpm = options?.bpm;
+    if (
+      typeof loopBeats === "number" &&
+      loopBeats > 0 &&
+      typeof bpm === "number" &&
+      bpm > 0
+    ) {
+      const beatEnd = (loopBeats * 60) / bpm;
+      return clampLoopBounds(
+        0,
+        Math.max(beatEnd, MIN_LOOP_REGION_SECONDS),
+        duration,
+      );
+    }
+    return clampLoopBounds(contentStart, contentEnd, duration);
   }
 
-  const start = Math.max(0, Math.min(loopRegion.start, duration));
-  let end = Math.max(start, Math.min(loopRegion.end, duration));
-  if (end - start < MIN_LOOP_REGION_SECONDS) {
-    end = Math.min(duration, start + MIN_LOOP_REGION_SECONDS);
+  if (mode === "content") {
+    if (contentBounds && contentEnd > contentStart) {
+      return clampLoopBounds(contentStart, contentEnd, duration);
+    }
+    return clampLoopBounds(0, duration, duration);
   }
-  return { start, end };
+
+  if (loopRegion) {
+    return clampLoopBounds(loopRegion.start, loopRegion.end, duration);
+  }
+
+  if (contentBounds && contentEnd > contentStart) {
+    return clampLoopBounds(contentStart, contentEnd, duration);
+  }
+
+  return clampLoopBounds(0, duration, duration);
 }
 
 export function normalizeLoopRegion(
@@ -477,6 +534,42 @@ export function computeArrangementDuration(
 ): number {
   if (lanes.length === 0) return 0;
   return Math.max(...lanes.map((lane) => computeLaneDuration(lane, tracks)));
+}
+
+/** Time span covering all placed clips — gaps between clips are included. */
+export function computeArrangementContentBounds(
+  lanes: ArrangementLane[],
+  tracks: Track[],
+): ArrangementLoopBounds | null {
+  let minStart = Number.POSITIVE_INFINITY;
+  let maxEnd = 0;
+  let hasClips = false;
+
+  for (const lane of lanes) {
+    const resolved = resolveLaneClips(lane, tracks);
+    for (let i = 0; i < resolved.length; i++) {
+      hasClips = true;
+      const start = getClipStartTime(lane, resolved, i);
+      const end = start + resolved[i].playbackDuration;
+      minStart = Math.min(minStart, start);
+      maxEnd = Math.max(maxEnd, end);
+    }
+  }
+
+  if (!hasClips || !Number.isFinite(minStart) || maxEnd <= minStart) {
+    return null;
+  }
+
+  return { start: minStart, end: maxEnd };
+}
+
+export function computeArrangementContentDuration(
+  lanes: ArrangementLane[],
+  tracks: Track[],
+): number {
+  const bounds = computeArrangementContentBounds(lanes, tracks);
+  if (!bounds) return 0;
+  return bounds.end - bounds.start;
 }
 
 /** Scrollable timeline length — content plus trailing pad for placement. */
