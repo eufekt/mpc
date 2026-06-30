@@ -55,7 +55,7 @@ export const ARRANGEMENT_TIMELINE_MIN_SECONDS = 60;
 
 export const DEFAULT_LANE_ROW_HEIGHT = 28;
 export const MIN_LANE_ROW_HEIGHT = 20;
-export const MAX_LANE_ROW_HEIGHT = 160;
+export const MAX_LANE_ROW_HEIGHT = 400;
 export const ARRANGEMENT_RULER_HEIGHT = 20;
 
 export function clampLaneRowHeight(height: number): number {

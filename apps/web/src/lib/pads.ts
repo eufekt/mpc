@@ -1,3 +1,4 @@
+import { DEFAULT_MASTER_EFFECTS } from "./masterEffects";
 import type { Chop, ChopPlayRequest, Track } from "./types";
 
 export type PadPressAction = "bind" | "play" | "noop";
@@ -44,13 +45,47 @@ export function getChopsForKey(tracks: Track[], key: string): BoundChop[] {
 export function toChopPlayRequests(bound: BoundChop[]): ChopPlayRequest[] {
   return bound.map((b) => ({
     trackId: b.trackId,
+    chopId: b.chop.id,
     start: b.chop.start,
     end: b.chop.end,
     key: b.chop.key!,
     volume: b.chop.volume,
     timeStretch: b.chop.timeStretch,
     reverse: b.chop.reverse,
+    effects: b.chop.effects ?? DEFAULT_MASTER_EFFECTS,
   }));
+}
+
+/** When auditioning a selected chop, play only that chop — not every track on the pad. */
+export function resolveChopsForKey(
+  tracks: Track[],
+  key: string,
+  selectedChop: { trackId: string; chopId: string } | null,
+  activeTrackId?: string | null,
+): BoundChop[] {
+  if (selectedChop && isSelectedChopPadKey(tracks, selectedChop, key)) {
+    const track = tracks.find((t) => t.id === selectedChop.trackId);
+    const chop = track?.chops.find((c) => c.id === selectedChop.chopId);
+    if (track && chop) {
+      return [{ trackId: track.id, chop }];
+    }
+  }
+  const bound = getChopsForKey(tracks, key);
+  if (activeTrackId && bound.length > 1) {
+    const onActive = bound.filter((item) => item.trackId === activeTrackId);
+    if (onActive.length > 0) return onActive;
+  }
+  return bound;
+}
+
+export function isSelectedChopPadKey(
+  tracks: Track[],
+  selectedChop: { trackId: string; chopId: string },
+  key: string,
+): boolean {
+  const track = tracks.find((t) => t.id === selectedChop.trackId);
+  const chop = track?.chops.find((c) => c.id === selectedChop.chopId);
+  return chop?.key?.toLowerCase() === key.toLowerCase();
 }
 
 export function resolvePadPress(options: {

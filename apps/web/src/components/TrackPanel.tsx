@@ -30,6 +30,7 @@ type Props = {
   updateChops: (trackId: string, chops: Chop[]) => void;
   onSelectChop: (trackId: string, chopId: string | null) => void;
   onDeleteChop: (trackId: string, chopId: string) => void;
+  onDuplicateChop: (trackId: string, chopId: string) => void;
   onChopColorChange: (trackId: string, chopId: string, color: string) => void;
   onChopNameChange: (trackId: string, chopId: string, name: string) => void;
   onChopVolumeChange: (trackId: string, chopId: string, volume: number) => void;
@@ -39,6 +40,8 @@ type Props = {
     timeStretch: number,
   ) => void;
   onChopReverseChange: (trackId: string, chopId: string, reverse: boolean) => void;
+  hasCopiedEffects?: boolean;
+  onPasteChopEffects?: (trackId: string, chopId: string) => void;
   onRemoveTrack: (trackId: string) => void;
   onRenameTrack: (trackId: string, name: string) => void;
   transportFocused: boolean;
@@ -59,11 +62,14 @@ export const TrackPanel = memo(function TrackPanel({
   updateChops,
   onSelectChop,
   onDeleteChop,
+  onDuplicateChop,
   onChopColorChange,
   onChopNameChange,
   onChopVolumeChange,
   onChopTimeStretchChange,
   onChopReverseChange,
+  hasCopiedEffects,
+  onPasteChopEffects,
   onRemoveTrack,
   onRenameTrack,
   transportFocused,
@@ -109,6 +115,11 @@ export const TrackPanel = memo(function TrackPanel({
     [onDeleteChop, track.id],
   );
 
+  const handleDuplicateChop = useCallback(
+    (chopId: string) => onDuplicateChop(track.id, chopId),
+    [onDuplicateChop, track.id],
+  );
+
   const handleTableNameChange = useCallback(
     (chopId: string, name: string) => {
       onChopNameChange(track.id, chopId, name);
@@ -142,6 +153,13 @@ export const TrackPanel = memo(function TrackPanel({
       onChopReverseChange(track.id, chopId, reverse);
     },
     [onChopReverseChange, track.id],
+  );
+
+  const handleTablePasteEffects = useCallback(
+    (chopId: string) => {
+      onPasteChopEffects?.(track.id, chopId);
+    },
+    [onPasteChopEffects, track.id],
   );
 
   return (
@@ -220,11 +238,16 @@ export const TrackPanel = memo(function TrackPanel({
           compact
           onSelect={handleSelectChop}
           onDelete={handleDeleteChop}
+          onDuplicate={handleDuplicateChop}
           onNameChange={handleTableNameChange}
           onVolumeChange={handleTableVolumeChange}
           onTimeStretchChange={handleTableTimeStretchChange}
           onReverseChange={handleTableReverseChange}
           onColorChange={handleTableColorChange}
+          hasCopiedEffects={hasCopiedEffects}
+          onPasteEffects={
+            onPasteChopEffects ? handleTablePasteEffects : undefined
+          }
         />
       </div>
     </section>

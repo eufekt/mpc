@@ -8,7 +8,9 @@ import {
   timeStretchToPercent,
 } from "../lib/arrangement";
 import type { Chop, Track } from "../lib/types";
+import { DEFAULT_MASTER_EFFECTS, type MasterEffects } from "../lib/masterEffects";
 import { formatTimePrecise } from "../lib/timeFormat";
+import { EffectsControls } from "./EffectsControls";
 
 type Props = {
   track: Track;
@@ -19,8 +21,13 @@ type Props = {
   onVolumeChange: (volume: number) => void;
   onTimeStretchChange: (timeStretch: number) => void;
   onReverseChange: (reverse: boolean) => void;
+  onEffectsChange: (effects: MasterEffects) => void;
+  hasCopiedEffects: boolean;
+  onCopyEffects: () => void;
+  onPasteEffects: () => void;
   onColorChange: (color: string) => void;
   onDelete: () => void;
+  onDuplicate: () => void;
   onClose: () => void;
 };
 
@@ -33,8 +40,13 @@ export function ChopInspector({
   onVolumeChange,
   onTimeStretchChange,
   onReverseChange,
+  onEffectsChange,
+  hasCopiedEffects,
+  onCopyEffects,
+  onPasteEffects,
   onColorChange,
   onDelete,
+  onDuplicate,
   onClose,
 }: Props) {
   const [colorMenuOpen, setColorMenuOpen] = useState(false);
@@ -149,6 +161,29 @@ export function ChopInspector({
         />
         <span>REVERSE</span>
       </label>
+
+      <EffectsControls
+        key={chop.id}
+        effects={chop.effects ?? DEFAULT_MASTER_EFFECTS}
+        onChange={onEffectsChange}
+        title="CHOP EFFECTS"
+        className="settings-effects chop-inspector-effects"
+      />
+
+      <div className="chop-inspector-effects-clipboard">
+        <button type="button" onClick={onCopyEffects}>
+          COPY EFFECTS
+        </button>
+        {hasCopiedEffects && (
+          <button type="button" onClick={onPasteEffects}>
+            PASTE EFFECTS
+          </button>
+        )}
+      </div>
+
+      <button type="button" className="chop-inspector-duplicate" onClick={onDuplicate}>
+        DUPLICATE CHOP
+      </button>
 
       <button type="button" className="chop-inspector-delete" onClick={onDelete}>
         DELETE CHOP

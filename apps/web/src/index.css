@@ -60,6 +60,9 @@ html,
 body {
   margin: 0;
   padding: 0;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
   background: var(--bg);
   color: var(--fg);
   font-family: "Courier New", Courier, monospace;
@@ -68,17 +71,27 @@ body {
   zoom: var(--ui-scale, 1);
 }
 
+#root {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 100%;
+}
+
 main {
-  max-width: 1400px;
-  margin: 0 auto;
-  padding: 16px;
+  width: 100%;
+  margin: 0;
+  padding: 0;
   display: flex;
   flex-direction: column;
   gap: 16px;
 }
 
 .app-shell {
+  flex: 1;
   min-height: 100vh;
+  height: 100%;
+  overflow: hidden;
 }
 
 .app-body {
@@ -86,6 +99,13 @@ main {
   min-height: 0;
   display: flex;
   flex-direction: column;
+  padding: 0 16px 16px;
+  overflow-y: auto;
+}
+
+.app-body > .workspace {
+  flex: 1;
+  min-height: 0;
 }
 
 .app-body-empty {
@@ -146,7 +166,7 @@ input[type="text"] {
   gap: 8px;
   background: var(--bg);
   border-bottom: 1px solid var(--border);
-  margin: -16px -16px 0;
+  margin: 0;
   padding: 4px 16px;
 }
 
@@ -193,8 +213,13 @@ input[type="text"] {
   display: flex;
   flex-direction: column;
   gap: 0;
-  margin: -8px -16px 0;
+  margin: 0;
   border-bottom: 1px solid var(--border);
+  flex-shrink: 1;
+  min-height: 0;
+  max-height: min(45vh, 32rem);
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
 
 .top-bar-panels > .midi-panel,
@@ -490,9 +515,12 @@ tr.selected input[type="range"]:focus-visible {
   text-align: center;
   vertical-align: middle;
   padding: 2px;
+  white-space: nowrap;
 }
 
-.chop-delete-btn {
+.chop-duplicate-btn,
+.chop-delete-btn,
+.chop-paste-effects-btn {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -500,6 +528,18 @@ tr.selected input[type="range"]:focus-visible {
   height: 18px;
   padding: 0;
   line-height: 1;
+}
+
+.chop-paste-effects-btn {
+  margin-right: 2px;
+  font-size: 9px;
+  font-weight: 600;
+  text-transform: lowercase;
+}
+
+.chop-duplicate-btn {
+  margin-right: 2px;
+  font-size: 11px;
 }
 
 .chop-delete-btn svg {
@@ -861,6 +901,81 @@ pre {
   display: flex;
   flex-direction: column;
   gap: 8px;
+  border: 1px solid var(--border-subtle);
+  padding: 6px 8px;
+}
+
+.settings-effect-block--disabled {
+  opacity: 0.75;
+}
+
+.settings-effect-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.settings-effect-header-main {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+  padding: 2px 0;
+  border: none;
+  background: transparent;
+  color: inherit;
+  font-family: inherit;
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.settings-effect-header-main:disabled {
+  cursor: default;
+  opacity: 1;
+}
+
+.settings-effect-header-main:not(:disabled):hover {
+  color: var(--text-secondary-2);
+}
+
+.settings-effect-label {
+  flex-shrink: 0;
+  letter-spacing: 0.04em;
+}
+
+.settings-effect-summary {
+  flex: 1;
+  min-width: 0;
+  font-size: 11px;
+  color: var(--text-secondary);
+  text-align: right;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.settings-effect-header .settings-effect-toggle.active {
+  background: var(--accent-color, #000);
+  border-color: var(--accent-color, #000);
+  color: #fff;
+}
+
+.settings-effect-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-top: 4px;
+  border-top: 1px solid var(--border-subtle);
+}
+
+.settings-effect-toggle.active {
+  background: var(--accent-color, #000);
+  color: var(--emphasis-fg, #fff);
+  border-color: var(--accent-color, #000);
 }
 
 .settings-slider-field {
@@ -1001,6 +1116,48 @@ pre {
   display: flex;
   flex-direction: column;
   gap: 8px;
+  min-height: 0;
+}
+
+.workspace--arrange .workspace-main {
+  flex: 1;
+  min-height: 0;
+}
+
+.workspace--arrange .arrangement-section {
+  flex: 1;
+  min-height: 0;
+}
+
+.workspace--arrange .arrangement-editor {
+  flex: 1;
+  min-height: 0;
+}
+
+.workspace--arrange .arrangement-timeline-area {
+  flex: 1;
+  min-height: 0;
+}
+
+.workspace--arrange .arrangement-timeline-layout {
+  flex: 1;
+  min-height: 0;
+}
+
+.workspace--arrange .arrangement-timeline-scroll {
+  overflow-y: auto;
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
 }
 
 .arrangement-editor {
@@ -1151,6 +1308,8 @@ pre {
 
 .arrangement-timeline-layout {
   display: flex;
+  flex: 1;
+  min-height: 0;
 }
 
 .arrangement-lane-labels {
@@ -1254,7 +1413,8 @@ pre {
   margin-right: auto;
 }
 
-.arrangement-zoom-controls {
+.arrangement-zoom-controls,
+.arrangement-lane-height-controls {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
@@ -1262,9 +1422,14 @@ pre {
   font-size: 11px;
 }
 
-.arrangement-zoom-value {
+.arrangement-zoom-value,
+.arrangement-lane-height-value {
   min-width: 3.5ch;
   text-align: center;
+}
+
+.arrangement-sizing-slider input[type="range"] {
+  width: 72px;
 }
 
 .arrangement-transport {
@@ -1329,7 +1494,9 @@ pre {
 .arrangement-timeline-scroll {
   flex: 1;
   overflow-x: auto;
+  overflow-y: hidden;
   min-width: 0;
+  min-height: 0;
 }
 
 .arrangement-timeline-content {
@@ -1635,8 +1802,17 @@ pre {
 .workspace {
   display: grid;
   grid-template-columns: minmax(160px, 200px) minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
   gap: 16px;
   align-items: start;
+}
+
+.workspace.workspace--tracks-top {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.workspace.workspace--tracks-top.has-inspector {
+  grid-template-columns: minmax(0, 1fr) minmax(220px, 260px);
 }
 
 .workspace.has-inspector {
@@ -1725,6 +1901,61 @@ pre {
   opacity: 0.85;
 }
 
+.track-strip {
+  display: flex;
+  flex-direction: row;
+  align-items: stretch;
+  gap: 0;
+  overflow-x: auto;
+  border: 1px solid var(--border);
+  min-width: 0;
+  flex-shrink: 0;
+}
+
+.track-strip-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+  padding: 4px 10px;
+  border: none;
+  border-right: 1px solid var(--border-subtle);
+  background: var(--bg);
+  font-family: inherit;
+  font-size: 11px;
+  text-align: left;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.track-strip-item:last-child {
+  border-right: none;
+}
+
+.track-strip-item.active {
+  background: var(--emphasis-bg);
+  color: var(--emphasis-fg);
+}
+
+.track-strip-index {
+  font-weight: bold;
+  flex-shrink: 0;
+}
+
+.track-strip-name {
+  font-weight: bold;
+  text-transform: uppercase;
+  max-width: 12rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.track-strip-meta {
+  font-size: 10px;
+  opacity: 0.75;
+  flex-shrink: 0;
+}
+
 .chop-inspector {
   border: 1px solid var(--border);
   display: flex;
@@ -1732,6 +1963,13 @@ pre {
   gap: 8px;
   padding: 8px;
   min-width: 0;
+  position: sticky;
+  top: 0;
+  align-self: start;
+  max-height: calc(100dvh - var(--pad-dock-height) - 2.5rem);
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
 
 .chop-inspector-header {
@@ -1795,19 +2033,57 @@ pre {
   font-size: 10px;
 }
 
+.chop-inspector-duplicate,
 .chop-inspector-delete {
   margin-top: 4px;
+}
+
+.chop-inspector-effects {
+  border-top: 1px solid var(--border);
+  padding-top: 8px;
+  gap: 8px;
+}
+
+.chop-inspector-effects h3 {
+  font-size: 11px;
+}
+
+.chop-inspector-effects .settings-effect-block {
+  padding: 4px 6px;
+}
+
+.chop-inspector-effects .settings-effect-header-main,
+.chop-inspector-effects .settings-effect-summary {
+  font-size: 10px;
+}
+
+.chop-inspector-effects .settings-effect-header button:last-child {
+  font-size: 10px;
+  padding: 2px 6px;
+}
+
+.chop-inspector-effects-clipboard {
+  display: flex;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.chop-inspector-effects-clipboard button {
+  flex: 1;
+  font-size: 10px;
+  padding: 4px 6px;
 }
 
 .pad-dock {
   flex-shrink: 0;
   background: var(--bg);
   border-top: 1px solid var(--border);
-  margin: 0 -16px -16px;
+  margin: 0;
   padding: 8px 16px 16px;
   display: flex;
   flex-direction: column;
   gap: 8px;
+  z-index: 5;
 }
 
 .pad-dock-toolbar {
@@ -2090,8 +2366,12 @@ pre {
 }
 
 @media (max-width: 900px) {
-  .workspace.has-inspector {
+  .workspace.has-inspector:not(.workspace--tracks-top) {
     grid-template-columns: minmax(140px, 180px) minmax(0, 1fr);
+  }
+
+  .workspace.workspace--tracks-top.has-inspector {
+    grid-template-columns: minmax(0, 1fr);
   }
 
   .chop-inspector {
@@ -2100,8 +2380,8 @@ pre {
 }
 
 @media (max-width: 640px) {
-  .workspace,
-  .workspace.has-inspector {
+  .workspace:not(.workspace--tracks-top),
+  .workspace.has-inspector:not(.workspace--tracks-top) {
     grid-template-columns: 1fr;
   }
 
@@ -2113,4 +2393,309 @@ pre {
     margin-left: 0;
     width: 100%;
   }
+}
+
+/* ── Brutal 3D UI ───────────────────────────────────────────── */
+
+html.brutal :is(
+  .settings-panel,
+  .midi-panel,
+  .projects-panel,
+  .track-panel,
+  .track-modal,
+  .play-workspace,
+  .chop-inspector,
+  .keyboard-workspace,
+  .waveform,
+  table,
+  input[type="text"],
+  input[type="file"],
+  select,
+  textarea,
+  .region-time-label,
+  button,
+  [role="button"],
+  .btn
+) {
+  --brutal-margin-left: max(0px, calc(-1 * var(--brutal-shadow-x)));
+  --brutal-margin-top: max(0px, calc(-1 * var(--brutal-shadow-y)));
+  --brutal-margin-right: max(0px, var(--brutal-shadow-x));
+  --brutal-margin-bottom: max(0px, var(--brutal-shadow-y));
+  margin-left: var(--brutal-margin-left);
+  margin-top: var(--brutal-margin-top);
+  margin-right: var(--brutal-margin-right);
+  margin-bottom: var(--brutal-margin-bottom);
+  position: relative;
+  isolation: isolate;
+  border-style: solid;
+  border-width: var(--brutal-border-width, 2px);
+  border-top-color: color-mix(
+    in srgb,
+    var(--border) calc(100% - var(--brutal-lit-top) * 0.55%),
+    var(--bg)
+  );
+  border-right-color: color-mix(
+    in srgb,
+    var(--border) calc(100% - var(--brutal-lit-right) * 0.55%),
+    var(--bg)
+  );
+  border-bottom-color: color-mix(
+    in srgb,
+    var(--border) calc(100% - var(--brutal-lit-bottom) * 0.55%),
+    var(--bg)
+  );
+  border-left-color: color-mix(
+    in srgb,
+    var(--border) calc(100% - var(--brutal-lit-left) * 0.55%),
+    var(--bg)
+  );
+  background-image: var(--brutal-face-overlay);
+  box-shadow:
+    inset var(--brutal-inset-hl-x) var(--brutal-inset-hl-y) 0 0
+      var(--brutal-inset-highlight),
+    inset var(--brutal-inset-sh-x) var(--brutal-inset-sh-y) 0 0
+      var(--brutal-inset-shadow);
+}
+
+html.brutal :is(
+  .settings-panel,
+  .midi-panel,
+  .projects-panel,
+  .track-panel,
+  .track-modal,
+  .play-workspace,
+  .chop-inspector,
+  .keyboard-workspace,
+  .waveform,
+  input[type="text"],
+  input[type="file"],
+  select,
+  textarea,
+  .region-time-label
+) {
+  transform: translate(
+    calc(-1 * var(--brutal-shadow-x)),
+    calc(-1 * var(--brutal-shadow-y))
+  );
+}
+
+html.brutal :is(
+  .settings-panel,
+  .midi-panel,
+  .projects-panel,
+  .track-panel,
+  .track-modal,
+  .play-workspace,
+  .chop-inspector,
+  .keyboard-workspace,
+  .waveform,
+  input[type="text"],
+  input[type="file"],
+  select,
+  textarea,
+  .region-time-label,
+  button,
+  [role="button"],
+  .btn
+)::before {
+  content: "";
+  position: absolute;
+  inset: calc(-1 * var(--brutal-border-width, 2px));
+  z-index: -1;
+  border-style: solid;
+  border-width: var(--brutal-border-width, 2px);
+  border-color: var(--brutal-depth-border-top) var(--brutal-depth-border-right)
+    var(--brutal-depth-border-bottom) var(--brutal-depth-border-left);
+  background: var(--brutal-shadow-bg);
+  pointer-events: none;
+  box-sizing: border-box;
+}
+
+/* Tables cannot reliably host ::before — solid-color offset shadow instead */
+html.brutal table {
+  background-image: var(--brutal-face-overlay);
+  box-shadow:
+    var(--brutal-shadow-x) var(--brutal-shadow-y) 0 0 var(--brutal-shadow-solid),
+    inset var(--brutal-inset-hl-x) var(--brutal-inset-hl-y) 0 0
+      var(--brutal-inset-highlight),
+    inset var(--brutal-inset-sh-x) var(--brutal-inset-sh-y) 0 0
+      var(--brutal-inset-shadow);
+}
+
+html.brutal table::before {
+  display: none;
+}
+
+html.brutal :is(
+  button,
+  [role="button"],
+  .btn
+) {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-top-color: color-mix(
+    in srgb,
+    var(--border) calc(100% - var(--brutal-lit-top) * 0.55%),
+    var(--bg)
+  ) !important;
+  border-right-color: color-mix(
+    in srgb,
+    var(--border) calc(100% - var(--brutal-lit-right) * 0.55%),
+    var(--bg)
+  ) !important;
+  border-bottom-color: color-mix(
+    in srgb,
+    var(--border) calc(100% - var(--brutal-lit-bottom) * 0.55%),
+    var(--bg)
+  ) !important;
+  border-left-color: color-mix(
+    in srgb,
+    var(--border) calc(100% - var(--brutal-lit-left) * 0.55%),
+    var(--bg)
+  ) !important;
+  transition:
+    transform 0.06s ease,
+    background 0.06s ease,
+    color 0.06s ease,
+    border-color 0.06s ease,
+    box-shadow 0.06s ease;
+}
+
+html.brutal :is(button, [role="button"], .btn):not(:disabled):not(.active):not(:active) {
+  transform: translate(
+    calc(-1 * var(--brutal-shadow-x)),
+    calc(-1 * var(--brutal-shadow-y))
+  );
+}
+
+html.brutal button.active:not(:disabled):not(:active),
+html.brutal [role="button"].active:not(:disabled):not(:active),
+html.brutal .btn.active:not(:disabled):not(:active) {
+  background: var(--emphasis-bg);
+  color: var(--emphasis-fg);
+  transform: none;
+  box-shadow:
+    inset calc(var(--brutal-inset-sh-x) * 1.5) calc(var(--brutal-inset-sh-y) * 1.5)
+      2px 0 var(--brutal-pressed-shadow),
+    inset calc(var(--brutal-inset-hl-x) * 1.5) calc(var(--brutal-inset-hl-y) * 1.5)
+      2px 0 var(--brutal-pressed-highlight);
+}
+
+html.brutal :is(button, [role="button"], .btn):not(:disabled):active {
+  background: var(--emphasis-bg);
+  color: var(--emphasis-fg);
+  transform: none;
+  box-shadow:
+    inset calc(var(--brutal-inset-sh-x) * 2) calc(var(--brutal-inset-sh-y) * 2) 2px 0
+      var(--brutal-pressed-shadow),
+    inset calc(var(--brutal-inset-hl-x) * 2) calc(var(--brutal-inset-hl-y) * 2) 2px 0
+      var(--brutal-pressed-highlight);
+}
+
+html.brutal :is(button, [role="button"], .btn):not(:disabled):hover {
+  filter: brightness(0.97);
+}
+
+html.brutal tr.selected button:not(:disabled):not(:active) {
+  background: var(--emphasis-bg);
+  color: var(--emphasis-fg);
+  border-color: var(--emphasis-fg) !important;
+}
+
+html.brutal tr.selected button::before {
+  border-color: var(--emphasis-fg);
+}
+
+html.brutal tr.selected button:not(:disabled):active {
+  border-color: var(--emphasis-fg) !important;
+}
+
+html.brutal :is(
+  .keyboard-workspace-chop-item,
+  .chop-picker-item,
+  .arrangement-lane-list-item
+).selected:not(:disabled):not(:active) {
+  border-color: var(--accent-color, var(--border)) !important;
+}
+
+html.brutal :is(
+  .keyboard-workspace-chop-item,
+  .chop-picker-item,
+  .arrangement-lane-list-item
+).selected:not(:disabled)::before {
+  border-color: var(--accent-color, var(--border));
+}
+
+html.brutal .pad.assigned:not(:disabled):not(:active) {
+  font-weight: bold;
+}
+
+html.brutal .pad.looping:not(:disabled):not(:active) {
+  background: var(--emphasis-bg);
+  color: var(--emphasis-fg);
+}
+
+html.brutal .settings-effect-header-main:not(:disabled) {
+  background: var(--bg);
+  padding: 4px 6px;
+}
+
+html.brutal .piano-key--white:not(:disabled) {
+  border-color: var(--border) !important;
+}
+
+html.brutal .piano-key--black:not(:disabled) {
+  border-color: var(--border) !important;
+}
+
+html.brutal :is(button, [role="button"], .btn):disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+  transform: none;
+  box-shadow:
+    inset calc(var(--brutal-inset-sh-x) * 1.5) calc(var(--brutal-inset-sh-y) * 1.5)
+      2px 0 var(--brutal-pressed-shadow),
+    inset calc(var(--brutal-inset-hl-x) * 1.5) calc(var(--brutal-inset-hl-y) * 1.5)
+      2px 0 var(--brutal-pressed-highlight);
+}
+
+html.brutal input[type="range"],
+html.brutal .playback-cursor,
+html.brutal .track-modal-backdrop,
+html.brutal .arrangement-playhead,
+html.brutal .arrangement-loop-region {
+  box-shadow: none !important;
+  transform: none !important;
+}
+
+html.brutal input[type="range"]::before,
+html.brutal .playback-cursor::before,
+html.brutal .track-modal-backdrop::before,
+html.brutal .arrangement-playhead::before,
+html.brutal .arrangement-loop-region::before {
+  display: none;
+}
+
+html.brutal input[type="range"] {
+  border: none !important;
+}
+
+html.brutal input[type="color"] {
+  border: 1px solid var(--border) !important;
+  box-shadow: none !important;
+  padding: 0;
+  transform: none !important;
+}
+
+html.brutal input[type="color"]::before {
+  display: none;
+}
+
+.settings-brutal-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  border-top: 1px solid var(--border-subtle);
+  padding-top: 8px;
 }

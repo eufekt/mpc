@@ -1,6 +1,7 @@
 import { useCallback, useRef, useState } from "react";
 import { stopSource } from "../lib/audioUtils";
 import {
+  createChopEffectsInsert,
   createMasterEffectsRack,
   DEFAULT_MASTER_EFFECTS,
   normalizeMasterEffects,
@@ -17,6 +18,7 @@ function effectivePlaybackRate(req: ChopPlayRequest): number {
 
 type ActivePlayback = {
   trackId: string;
+  chopId: string;
   start: number;
   end: number;
   startedAt: number;
@@ -36,6 +38,14 @@ type TrackTransport = {
 type LoopState = {
   padKey: string;
   sources: Array<{ trackId: string; source: AudioBufferSourceNode }>;
+};
+
+type ActiveChopFx = {
+  rack: MasterEffectsRack;
+  trackId: string;
+  chopId: string;
+  start: number;
+  end: number;
 };
 
 function padSourceKey(trackId: string, padKey: string): string {
@@ -58,6 +68,9 @@ export function useAudioEngine() {
   const loopRef = useRef<LoopState | null>(null);
   const activePlaybackRef = useRef<ActivePlayback | null>(null);
   const chopPlaybackRef = useRef<Map<string, ActivePlayback>>(new Map());
+  const chopFxRacksRef = useRef<Map<AudioBufferSourceNode, ActiveChopFx>>(
+    new Map(),
+  );
   const transportRef = useRef<Map<string, TrackTransport>>(new Map());
   const [transportVersion, setTransportVersion] = useState(0);
 
@@ -97,6 +110,18 @@ export function useAudioEngine() {
     effectsRackRef.current?.apply(normalized);
   }, []);
 
+  const updateActiveChopEffects = useCallback(
+    (trackId: string, chopId: string, effects: MasterEffects) => {
+      const normalized = normalizeMasterEffects(effects);
+      for (const entry of chopFxRacksRef.current.values()) {
+        if (entry.trackId === trackId && entry.chopId === chopId) {
+          entry.rack.apply(normalized);
+        }
+      }
+    },
+    [],
+  );
+
   const resume = useCallback(async () => {
     const ctx = getContext();
     if (ctx.state === "suspended") {
@@ -113,11 +138,32 @@ export function useAudioEngine() {
     return transport;
   }, []);
 
+  const registerChopFx = useCallback(
+    (
+      source: AudioBufferSourceNode,
+      rack: MasterEffectsRack,
+      trackId: string,
+      chopId: string,
+      start: number,
+      end: number,
+    ) => {
+      chopFxRacksRef.current.set(source, {
+        rack,
+        trackId,
+        chopId,
+        start,
+        end,
+      });
+    },
+    [],
+  );
+
   const stopPad = useCallback((trackId: string, padKey: string) => {
     const key = padSourceKey(trackId, padKey);
     const existing = padSourcesRef.current.get(key);
     if (!existing) return;
     stopSource(existing);
+    chopFxRacksRef.current.delete(existing);
     padSourcesRef.current.delete(key);
   }, []);
 
@@ -155,6 +201,7 @@ export function useAudioEngine() {
     if (!loop) return;
     for (const { trackId, source } of loop.sources) {
       stopSource(source);
+      chopFxRacksRef.current.delete(source);
       const chopPlayback = chopPlaybackRef.current.get(trackId);
       if (chopPlayback?.source === source) {
         chopPlaybackRef.current.delete(trackId);
@@ -175,6 +222,7 @@ export function useAudioEngine() {
       for (const [key, source] of padSourcesRef.current.entries()) {
         if (key.startsWith(`${trackId}:`)) {
           stopSource(source);
+          chopFxRacksRef.current.delete(source);
           padSourcesRef.current.delete(key);
         }
       }
@@ -182,20 +230,28 @@ export function useAudioEngine() {
     [],
   );
 
-  const stopAllPlayback = useCallback(() => {
+  const stopChopAndPadPlayback = useCallback(() => {
     stopLoop();
-    for (const trackId of transportRef.current.keys()) {
-      pauseTrack(trackId);
-    }
     for (const source of padSourcesRef.current.values()) {
       stopSource(source);
     }
     padSourcesRef.current.clear();
     chopPlaybackRef.current.clear();
+    for (const [source] of chopFxRacksRef.current) {
+      stopSource(source);
+    }
+    chopFxRacksRef.current.clear();
+  }, [stopLoop]);
+
+  const stopAllPlayback = useCallback(() => {
+    stopChopAndPadPlayback();
+    for (const trackId of transportRef.current.keys()) {
+      pauseTrack(trackId);
+    }
     if (activePlaybackRef.current?.kind === "chop") {
       activePlaybackRef.current = null;
     }
-  }, [stopLoop, pauseTrack]);
+  }, [stopChopAndPadPlayback, pauseTrack]);
 
   const setSeekTime = useCallback(
     (trackId: string, time: number) => {
@@ -317,6 +373,11 @@ export function useAudioEngine() {
       trackNamesRef.current.delete(trackId);
       transportRef.current.delete(trackId);
       chopPlaybackRef.current.delete(trackId);
+      for (const [source, entry] of chopFxRacksRef.current) {
+        if (entry.trackId === trackId) {
+          chopFxRacksRef.current.delete(source);
+        }
+      }
       setLoadedTrackIds(Array.from(buffersRef.current.keys()));
       bumpTransport();
     },
@@ -393,6 +454,7 @@ export function useAudioEngine() {
       const startedAt = ctx.currentTime;
       activePlaybackRef.current = {
         trackId,
+        chopId: "",
         start: from,
         end: buffer.duration,
         startedAt,
@@ -457,22 +519,32 @@ export function useAudioEngine() {
           trackId: string;
           source: AudioBufferSourceNode;
           req: ChopPlayRequest;
+          rack: MasterEffectsRack;
         }> = [];
         for (const req of requests) {
           const buffer = buffersRef.current.get(req.trackId);
           if (!buffer) continue;
           const rate = effectivePlaybackRate(req);
+          const chopFx = createChopEffectsInsert(ctx, gain, req.effects);
           const source = playSliceLoop(
             ctx,
             buffer,
             req.start,
             req.end,
-            gain,
+            chopFx.input,
             req.volume,
             rate,
             req.reverse,
           );
-          sources.push({ trackId: req.trackId, source, req });
+          registerChopFx(
+            source,
+            chopFx,
+            req.trackId,
+            req.chopId,
+            req.start,
+            req.end,
+          );
+          sources.push({ trackId: req.trackId, source, req, rack: chopFx });
         }
         if (sources.length === 0) return;
 
@@ -486,6 +558,7 @@ export function useAudioEngine() {
         for (const { trackId, source, req } of sources) {
           chopPlaybackRef.current.set(trackId, {
             trackId,
+            chopId: req.chopId,
             start: req.start,
             end: req.end,
             startedAt,
@@ -508,21 +581,31 @@ export function useAudioEngine() {
         }
 
         const rate = effectivePlaybackRate(req);
+        const chopFx = createChopEffectsInsert(ctx, gain, req.effects);
         const source = playSlice(
           ctx,
           buffer,
           req.start,
           req.end,
-          gain,
+          chopFx.input,
           req.volume,
           0,
           rate,
           req.reverse,
         );
+        registerChopFx(
+          source,
+          chopFx,
+          req.trackId,
+          req.chopId,
+          req.start,
+          req.end,
+        );
         const sourceKey = padSourceKey(req.trackId, req.key);
         const startedAt = ctx.currentTime;
         const playback: ActivePlayback = {
           trackId: req.trackId,
+          chopId: req.chopId,
           start: req.start,
           end: req.end,
           startedAt,
@@ -535,6 +618,7 @@ export function useAudioEngine() {
         chopPlaybackRef.current.set(req.trackId, playback);
 
         source.onended = () => {
+          chopFxRacksRef.current.delete(source);
           const current = chopPlaybackRef.current.get(req.trackId);
           if (current?.source === source) {
             chopPlaybackRef.current.delete(req.trackId);
@@ -552,7 +636,7 @@ export function useAudioEngine() {
         }
       }
     },
-    [getContext, resume, stopLoop, stopPad, pauseTrack],
+    [getContext, resume, stopLoop, stopPad, pauseTrack, registerChopFx],
   );
 
   const getMasterGain = useCallback(() => {
@@ -576,6 +660,7 @@ export function useAudioEngine() {
     toggleTrackPlayback,
     pauseTrack,
     stopLoop,
+    stopChopAndPadPlayback,
     stopAllPlayback,
     isTrackPlaying,
     getPlayingTrackId,
@@ -586,6 +671,7 @@ export function useAudioEngine() {
     resume,
     setVolume,
     setMasterEffects,
+    updateActiveChopEffects,
     getContext,
     getMasterGain,
   };

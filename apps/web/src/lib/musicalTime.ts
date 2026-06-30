@@ -27,7 +27,13 @@ export function secondsPerBar(bpm: number, beatsPerBar: number): number {
   return secondsPerBeat(bpm) * beatsPerBar;
 }
 
-/** Grid step in seconds — snapDivision 4 = quarter, 8 = eighth, 16 = sixteenth. */
+export const SNAP_DIVISIONS = [4, 8, 16, 32, 64, 128] as const satisfies readonly SnapDivision[];
+
+export function isSnapDivision(value: number): value is SnapDivision {
+  return (SNAP_DIVISIONS as readonly number[]).includes(value);
+}
+
+/** Grid step in seconds — snapDivision 4 = quarter, 8 = eighth, 16 = sixteenth, etc. */
 export function snapGridStep(settings: MusicalTimeSettings): number {
   const beat = secondsPerBeat(settings.bpm);
   return beat * (4 / settings.snapDivision);
@@ -72,7 +78,7 @@ export function beatWidthPx(bpm: number, pxPerSecond: number): number {
 }
 
 export function snapDivisionLabel(division: SnapDivision): string {
-  return `1/${division === 4 ? 4 : division === 8 ? 8 : 16}`;
+  return `1/${division}`;
 }
 
 export function normalizeMusicalTime(
@@ -82,7 +88,7 @@ export function normalizeMusicalTime(
   if (!raw) return defaults;
 
   const snapDivision: SnapDivision =
-    raw.snapDivision === 4 || raw.snapDivision === 8 || raw.snapDivision === 16
+    typeof raw.snapDivision === "number" && isSnapDivision(raw.snapDivision)
       ? raw.snapDivision
       : defaults.snapDivision;
 

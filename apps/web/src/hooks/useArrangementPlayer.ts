@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { stopSource } from "../lib/audioUtils";
 import {
   computeArrangementDuration,
+  filterLoadedTracks,
   getClipStartTime,
   getFreeClipAudibleSegments,
   resolveLaneClips,
@@ -10,6 +11,7 @@ import {
   type ResolvedClip,
 } from "../lib/arrangement";
 import { playSlice } from "../lib/sliceAudioBuffer";
+import { createChopEffectsInsert, normalizeMasterEffects } from "../lib/masterEffects";
 import { secondsPerBeat } from "../lib/musicalTime";
 import type {
   ArrangementLane,
@@ -54,6 +56,7 @@ function loopIterationSchedule(
 type Params = {
   lanes: ArrangementLane[];
   tracks: Track[];
+  loadedTrackIds: string[];
   loopRegion: ArrangementLoopRegion | null | undefined;
   musicalTime: MusicalTimeSettings;
   getBuffer: (trackId: string) => AudioBuffer | undefined;
@@ -117,12 +120,18 @@ function scheduleClipWallSegment(
 
   if (bufferEnd <= bufferStart) return null;
 
+  const chopFx = createChopEffectsInsert(
+    ctx,
+    laneGain,
+    normalizeMasterEffects(item.chop.effects),
+  );
+
   return playSlice(
     ctx,
     buffer,
     bufferStart,
     bufferEnd,
-    laneGain,
+    chopFx.input,
     volume,
     when,
     item.timeStretch,
@@ -266,6 +275,7 @@ function loopPlayheadTime(
 export function useArrangementPlayer({
   lanes,
   tracks,
+  loadedTrackIds,
   loopRegion,
   musicalTime,
   getBuffer,
@@ -287,6 +297,7 @@ export function useArrangementPlayer({
   const loopRef = useRef(false);
   const lanesRef = useRef(lanes);
   const tracksRef = useRef(tracks);
+  const loadedTrackIdsRef = useRef(loadedTrackIds);
   const getBufferRef = useRef(getBuffer);
   const musicalTimeRef = useRef(musicalTime);
   const [isPlaying, setIsPlaying] = useState(false);
@@ -301,9 +312,14 @@ export function useArrangementPlayer({
   useEffect(() => {
     lanesRef.current = lanes;
     tracksRef.current = tracks;
+    loadedTrackIdsRef.current = loadedTrackIds;
     getBufferRef.current = getBuffer;
     musicalTimeRef.current = musicalTime;
-  }, [lanes, tracks, getBuffer, musicalTime]);
+  }, [lanes, tracks, loadedTrackIds, getBuffer, musicalTime]);
+
+  const playableTracks = useCallback((): Track[] => {
+    return filterLoadedTracks(tracksRef.current, loadedTrackIdsRef.current);
+  }, []);
 
   const bump = useCallback(() => {
     setVersion((n) => n + 1);
@@ -385,7 +401,10 @@ export function useArrangementPlayer({
         );
         const sources = scheduleArrangement({
           lanes: lanesRef.current,
-          tracks: tracksRef.current,
+          tracks: filterLoadedTracks(
+            tracksRef.current,
+            loadedTrackIdsRef.current,
+          ),
           getBuffer: getBufferRef.current,
           ctx,
           laneGains: laneGainsRef.current,
@@ -543,7 +562,8 @@ export function useArrangementPlayer({
 
       syncLaneGains();
 
-      const duration = computeArrangementDuration(lanes, tracks);
+      const playable = playableTracks();
+      const duration = computeArrangementDuration(lanes, playable);
       if (duration <= 0) return;
 
       const bounds = resolveLoopBounds(loopRegion, duration);
@@ -572,7 +592,7 @@ export function useArrangementPlayer({
       } else {
         scheduledSourcesRef.current = scheduleArrangement({
           lanes,
-          tracks,
+          tracks: playable,
           getBuffer,
           ctx,
           laneGains: laneGainsRef.current,
@@ -616,6 +636,7 @@ export function useArrangementPlayer({
       stopLoopMaintainer,
       stopSources,
       syncLaneGains,
+      playableTracks,
       tracks,
       loopRegion,
       musicalTime,
@@ -624,14 +645,14 @@ export function useArrangementPlayer({
 
   const setSeekTime = useCallback(
     (time: number) => {
-      const duration = computeArrangementDuration(lanes, tracks);
+      const duration = computeArrangementDuration(lanes, playableTracks());
       const next = Math.max(0, Math.min(time, duration));
       setSeekTimeState(next);
       if (isPlaying) {
         void play(next);
       }
     },
-    [isPlaying, lanes, play, tracks],
+    [isPlaying, lanes, play, playableTracks],
   );
 
   const getPlayheadTime = useCallback(() => {

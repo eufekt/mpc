@@ -14,6 +14,8 @@ export type Chop = {
   timeStretch: number;
   /** When true, chop plays from end to start. */
   reverse: boolean;
+  /** Per-chop insert — applied before the session master effects bus. */
+  effects: MasterEffects;
 };
 
 export type SourceType = "file" | "youtube";
@@ -58,7 +60,7 @@ export type ArrangementLoopRegion = {
   end: number;
 };
 
-export type SnapDivision = 4 | 8 | 16;
+export type SnapDivision = 4 | 8 | 16 | 32 | 64 | 128;
 
 export type MusicalTimeSettings = {
   /** Default 90, clamped 40–240. */
@@ -115,6 +117,7 @@ export type SavedSessionMetaV2 = {
 
 export type ChopPlayRequest = {
   trackId: string;
+  chopId: string;
   start: number;
   end: number;
   key: string;
@@ -123,6 +126,7 @@ export type ChopPlayRequest = {
   reverse: boolean;
   /** Semitone offset from the chop's natural pitch (keyboard mode). */
   pitchSemitones?: number;
+  effects: MasterEffects;
 };
 
 /** v1 layout — kept for migration from older saved sessions. */

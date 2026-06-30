@@ -16,6 +16,7 @@ import { UrlInput } from "./components/UrlInput";
 import { MidiDebugPanel } from "./components/MidiDebugPanel";
 import { ProjectsPanel } from "./components/ProjectsPanel";
 import { SettingsPanel } from "./components/SettingsPanel";
+import { useChopEffectsClipboard } from "./hooks/useChopEffectsClipboard";
 import { useArrangementPlayer } from "./hooks/useArrangementPlayer";
 import { useAudioEngine } from "./hooks/useAudioEngine";
 import { useKeyboardModeInput } from "./hooks/useKeyboardModeInput";
@@ -25,7 +26,9 @@ import {
   type SelectedChop,
 } from "./hooks/useSamplerKeyboard";
 import { useSessionPersistence } from "./hooks/useSessionPersistence";
+import { useBrutalStyle } from "./hooks/useBrutalStyle";
 import { useTheme } from "./hooks/useTheme";
+import { useTrackLayout } from "./hooks/useTrackLayout";
 import { useUiScale } from "./hooks/useUiScale";
 import { useProjects } from "./hooks/useProjects";
 import { createTrack, createArrangementLane, useSessionState } from "./hooks/useSessionState";
@@ -39,9 +42,15 @@ import {
 } from "./lib/trackNames";
 import { deleteTrackAudio } from "./lib/sessionPersistence";
 import {
+  DEFAULT_MASTER_EFFECTS,
+  type MasterEffects,
+} from "./lib/masterEffects";
+import {
   getAssignedKeys,
   getChopsForKey,
   getKeyColors,
+  isSelectedChopPadKey,
+  resolveChopsForKey,
   resolvePadPress,
   toChopPlayRequests,
 } from "./lib/pads";
@@ -62,8 +71,15 @@ import {
 
 export default function App() {
   const { theme, setTheme } = useTheme();
+  const { trackLayout, setTrackLayout } = useTrackLayout();
   const { uiScale, setUiScale, resetUiScale } = useUiScale();
+  const { brutalStyle, patchBrutalStyle } = useBrutalStyle();
   const engine = useAudioEngine();
+  const {
+    copyEffects,
+    pasteEffects,
+    hasCopiedEffects,
+  } = useChopEffectsClipboard();
   const {
     projects,
     activeProjectId,
@@ -84,6 +100,7 @@ export default function App() {
     setActiveTrack,
     updateChops,
     deleteChop,
+    duplicateChop,
     updateChop,
     bindKey,
     setPaletteMode,
@@ -132,6 +149,7 @@ export default function App() {
   const arrangementPlayer = useArrangementPlayer({
     lanes: session.arrangement.lanes,
     tracks: session.tracks,
+    loadedTrackIds: engine.loadedTrackIds,
     loopRegion: session.arrangement.loopRegion,
     musicalTime: normalizeMusicalTime(session.arrangement.musicalTime),
     getBuffer: (trackId) => engine.getBuffer(trackId) ?? undefined,
@@ -191,8 +209,12 @@ export default function App() {
   );
 
   const arrangementDuration = useMemo(
-    () => computeArrangementDuration(session.arrangement.lanes, session.tracks),
-    [session.arrangement.lanes, session.tracks],
+    () =>
+      computeArrangementDuration(
+        session.arrangement.lanes,
+        loadedTracks,
+      ),
+    [session.arrangement.lanes, loadedTracks],
   );
 
   const totalChopCount = useMemo(
@@ -225,6 +247,7 @@ export default function App() {
 
   useEffect(() => {
     if (loadedTracks.length === 0) return;
+    if (workflowMode === "arrange" || workflowMode === "play") return;
     setTransportFocus((prev) => {
       if (
         prev.type === "track" &&
@@ -238,7 +261,7 @@ export default function App() {
           : loadedTracks[0].id;
       return { type: "track", trackId };
     });
-  }, [loadedTracks, activeTrackId]);
+  }, [loadedTracks, activeTrackId, workflowMode]);
 
   const focusTrackTransport = useCallback((trackId: string) => {
     setTransportFocus({ type: "track", trackId });
@@ -253,6 +276,20 @@ export default function App() {
 
     if (arrangementPlayer.isPlaying) {
       pauseArrangement();
+      return;
+    }
+
+    if (workflowMode === "arrange" || workflowMode === "play") {
+      if (engine.loopingKey) {
+        engine.stopLoop();
+        return;
+      }
+      const playingTrackId = engine.getPlayingTrackId();
+      if (playingTrackId) {
+        engine.pauseTrack(playingTrackId);
+        return;
+      }
+      await toggleArrangementPlayback();
       return;
     }
 
@@ -286,6 +323,7 @@ export default function App() {
     stopArrangement,
     toggleArrangementPlayback,
     transportFocus,
+    workflowMode,
   ]);
 
   useEffect(() => {
@@ -416,11 +454,25 @@ export default function App() {
   const playKey = useCallback(
     (key: string) => {
       stopArrangement();
-      const requests = toChopPlayRequests(getChopsForKey(session.tracks, key));
+      const bound = resolveChopsForKey(
+        session.tracks,
+        key,
+        selectedChop,
+        workflowMode === "sample" ? activeTrackId : null,
+      );
+      const requests = toChopPlayRequests(bound);
       if (requests.length === 0) return;
       void engine.playChops(requests, session.padMode);
     },
-    [engine, session.tracks, session.padMode, stopArrangement],
+    [
+      engine,
+      session.tracks,
+      session.padMode,
+      stopArrangement,
+      selectedChop,
+      workflowMode,
+      activeTrackId,
+    ],
   );
 
   const flashPad = useCallback((key: string) => {
@@ -462,6 +514,7 @@ export default function App() {
         [
           {
             trackId: track.id,
+            chopId: chop.id,
             start: chop.start,
             end: chop.end,
             key: `kb${midiNote}`,
@@ -469,6 +522,7 @@ export default function App() {
             timeStretch: chop.timeStretch,
             reverse: chop.reverse,
             pitchSemitones: semitoneOffset(rootMidiNote, midiNote),
+            effects: chop.effects ?? DEFAULT_MASTER_EFFECTS,
           },
         ],
         "layer",
@@ -544,7 +598,12 @@ export default function App() {
 
       flashPad(key.toUpperCase());
       playKey(key);
-      if (selectedChop) setSelectedChop(null);
+      if (
+        selectedChop &&
+        !isSelectedChopPadKey(session.tracks, selectedChop, key)
+      ) {
+        setSelectedChop(null);
+      }
     },
     [
       engine,
@@ -581,7 +640,12 @@ export default function App() {
     onTogglePlayMode: () => setPlayMode((prev) => !prev),
     onPlayKey: (key) => {
       playKey(key);
-      setSelectedChop(null);
+      if (
+        selectedChop &&
+        !isSelectedChopPadKey(session.tracks, selectedChop, key)
+      ) {
+        setSelectedChop(null);
+      }
     },
     onBindKey: handleBindKey,
     onPadPress: flashPad,
@@ -668,10 +732,11 @@ export default function App() {
 
   const handleSelectTrack = useCallback(
     (trackId: string) => {
+      engine.stopChopAndPadPlayback();
       setActiveTrack(trackId);
       setSelectedChop(null);
     },
-    [setActiveTrack],
+    [setActiveTrack, engine],
   );
 
   const handleSelectChop = useCallback(
@@ -694,6 +759,16 @@ export default function App() {
       );
     },
     [deleteChop],
+  );
+
+  const handleDuplicateChop = useCallback(
+    (trackId: string, chopId: string) => {
+      const track = session.tracks.find((item) => item.id === trackId);
+      if (!track?.chops.some((chop) => chop.id === chopId)) return;
+      const newChopId = duplicateChop(trackId, chopId);
+      setSelectedChop({ trackId, chopId: newChopId });
+    },
+    [duplicateChop, session.tracks],
   );
 
   const handleChopColorChange = useCallback(
@@ -729,6 +804,23 @@ export default function App() {
       updateChop(trackId, chopId, { name });
     },
     [updateChop],
+  );
+
+  const handleChopEffectsChange = useCallback(
+    (trackId: string, chopId: string, effects: MasterEffects) => {
+      updateChop(trackId, chopId, { effects });
+      engine.updateActiveChopEffects(trackId, chopId, effects);
+    },
+    [updateChop, engine],
+  );
+
+  const handlePasteChopEffects = useCallback(
+    (trackId: string, chopId: string) => {
+      const effects = pasteEffects();
+      if (!effects) return;
+      handleChopEffectsChange(trackId, chopId, effects);
+    },
+    [pasteEffects, handleChopEffectsChange],
   );
 
   const trackTransport = useMemo(
@@ -983,6 +1075,10 @@ export default function App() {
               uiScale={uiScale}
               onUiScaleChange={setUiScale}
               onUiScaleReset={resetUiScale}
+              trackLayout={trackLayout}
+              onTrackLayoutChange={setTrackLayout}
+              brutalStyle={brutalStyle}
+              onBrutalStyleChange={patchBrutalStyle}
               projectName={activeProject?.name ?? "Untitled"}
               onClearSavedData={() => void handleClearSavedData()}
             />
@@ -1027,7 +1123,14 @@ export default function App() {
             className={[
               "workspace",
               workflowMode === "play" ? "workspace--play" : "",
+              workflowMode === "arrange" ? "workspace--arrange" : "",
               workflowMode === "keyboard" ? "workspace--keyboard" : "",
+              workflowMode !== "play" && trackLayout === "top"
+                ? "workspace--tracks-top"
+                : "",
+              workflowMode !== "play" && trackLayout === "side"
+                ? "workspace--tracks-side"
+                : "",
               inspectorChop &&
               workflowMode !== "play" &&
               workflowMode !== "keyboard"
@@ -1037,15 +1140,24 @@ export default function App() {
               .filter(Boolean)
               .join(" ")}
           >
-            {workflowMode !== "play" && (
+            {workflowMode !== "play" && trackLayout === "side" && (
               <TrackSidebar
                 tracks={loadedTracks}
                 activeTrackId={activeTrackId}
+                layout="side"
                 onSelectTrack={handleSelectTrack}
               />
             )}
 
             <div className="workspace-main">
+              {workflowMode !== "play" && trackLayout === "top" && (
+                <TrackSidebar
+                  tracks={loadedTracks}
+                  activeTrackId={activeTrackId}
+                  layout="top"
+                  onSelectTrack={handleSelectTrack}
+                />
+              )}
               {workflowMode === "sample" && activeLoadedTrack && (() => {
                 const buffer = engine.getBuffer(activeLoadedTrack.id);
                 if (!buffer) {
@@ -1076,11 +1188,14 @@ export default function App() {
                     updateChops={updateChops}
                     onSelectChop={handleSelectChop}
                     onDeleteChop={handleDeleteChop}
+                    onDuplicateChop={handleDuplicateChop}
                     onChopColorChange={handleChopColorChange}
                     onChopNameChange={handleChopNameChange}
                     onChopVolumeChange={handleChopVolumeChange}
                     onChopTimeStretchChange={handleChopTimeStretchChange}
                     onChopReverseChange={handleChopReverseChange}
+                    hasCopiedEffects={hasCopiedEffects}
+                    onPasteChopEffects={handlePasteChopEffects}
                     onRemoveTrack={handleRemoveTrack}
                     onRenameTrack={handleRenameTrack}
                     transportFocused={
@@ -1095,7 +1210,7 @@ export default function App() {
               })()}
 
               {workflowMode === "sample" && !activeLoadedTrack && (
-                <p className="hint">select a track from the sidebar</p>
+                <p className="hint">select a track</p>
               )}
 
               {workflowMode === "arrange" && (
@@ -1222,6 +1337,23 @@ export default function App() {
                     reverse,
                   )
                 }
+                onEffectsChange={(effects) =>
+                  handleChopEffectsChange(
+                    inspectorChop.track.id,
+                    inspectorChop.chop.id,
+                    effects,
+                  )
+                }
+                hasCopiedEffects={hasCopiedEffects}
+                onCopyEffects={() =>
+                  copyEffects(inspectorChop.chop.effects ?? DEFAULT_MASTER_EFFECTS)
+                }
+                onPasteEffects={() =>
+                  handlePasteChopEffects(
+                    inspectorChop.track.id,
+                    inspectorChop.chop.id,
+                  )
+                }
                 onColorChange={(color) =>
                   handleChopColorChange(
                     inspectorChop.track.id,
@@ -1231,6 +1363,9 @@ export default function App() {
                 }
                 onDelete={() =>
                   handleDeleteChop(inspectorChop.track.id, inspectorChop.chop.id)
+                }
+                onDuplicate={() =>
+                  handleDuplicateChop(inspectorChop.track.id, inspectorChop.chop.id)
                 }
                 onClose={() => setSelectedChop(null)}
               />

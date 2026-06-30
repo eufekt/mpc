@@ -110,13 +110,22 @@ export function ArrangementLaneStrip({
     const beatPx = beatWidthPx(musicalTime.bpm, pxPerSecond);
     const barPx = beatPx * musicalTime.beatsPerBar;
     if (beatPx <= 0) return undefined;
+    const snapPx = musicalTime.snapEnabled
+      ? beatPx * (4 / musicalTime.snapDivision)
+      : beatPx;
     return {
       backgroundImage: [
-        `repeating-linear-gradient(to right, var(--border-faint) 0, var(--border-faint) 1px, transparent 1px, transparent ${beatPx}px)`,
+        `repeating-linear-gradient(to right, var(--border-faint) 0, var(--border-faint) 1px, transparent 1px, transparent ${snapPx}px)`,
         `repeating-linear-gradient(to right, var(--border) 0, var(--border) 1px, transparent 1px, transparent ${barPx}px)`,
       ].join(", "),
     } as React.CSSProperties;
-  }, [musicalTime.bpm, musicalTime.beatsPerBar, pxPerSecond]);
+  }, [
+    musicalTime.bpm,
+    musicalTime.beatsPerBar,
+    musicalTime.snapDivision,
+    musicalTime.snapEnabled,
+    pxPerSecond,
+  ]);
 
   const handleStripClick = (e: React.MouseEvent<HTMLDivElement>) => {
     onSelectLane(lane.id);

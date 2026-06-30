@@ -9,13 +9,21 @@ import {
   formatDuration,
   getAllChops,
   ARRANGEMENT_RULER_HEIGHT,
+  MAX_LANE_ROW_HEIGHT,
+  MIN_LANE_ROW_HEIGHT,
 } from "../lib/arrangement";
 import { useTimelineZoom } from "../hooks/useTimelineZoom";
-import { timelineZoomPercent } from "../lib/timelineZoom";
+import {
+  adjustTimelineZoom,
+  MAX_TIMELINE_ZOOM,
+  MIN_TIMELINE_ZOOM,
+  timelineZoomPercent,
+} from "../lib/timelineZoom";
 import {
   clampBpm,
   defaultMusicalTime,
   normalizeMusicalTime,
+  SNAP_DIVISIONS,
   snapDivisionLabel,
 } from "../lib/musicalTime";
 import type {
@@ -187,6 +195,17 @@ export function ArrangementSection({
       window.addEventListener("pointerup", onUp);
     },
     [laneRowHeight, lanes.length, onLaneRowHeightChange],
+  );
+
+  const handleTimelineWheel = useCallback(
+    (event: React.WheelEvent<HTMLDivElement>) => {
+      if (!event.ctrlKey && !event.metaKey) return;
+      event.preventDefault();
+      setTimelineZoom(
+        adjustTimelineZoom(timelineZoom, event.deltaY < 0 ? "in" : "out"),
+      );
+    },
+    [setTimelineZoom, timelineZoom],
   );
 
   const timelineAreaHeight =
@@ -372,7 +391,7 @@ export function ArrangementSection({
           </button>
           <div className="arrangement-grid-selector">
             <span>GRID</span>
-            {([4, 8, 16] as const).map((division) => (
+            {SNAP_DIVISIONS.map((division) => (
               <button
                 key={division}
                 type="button"
@@ -403,23 +422,80 @@ export function ArrangementSection({
           <span>ZOOM</span>
           <button
             type="button"
-            onClick={() => setTimelineZoom(timelineZoom - 0.25)}
+            onClick={() => setTimelineZoom(adjustTimelineZoom(timelineZoom, "out"))}
             aria-label="Zoom timeline out"
           >
             −
           </button>
+          <label className="arrangement-sizing-slider">
+            <span className="visually-hidden">Timeline zoom</span>
+            <input
+              type="range"
+              min={MIN_TIMELINE_ZOOM * 100}
+              max={MAX_TIMELINE_ZOOM * 100}
+              step={5}
+              value={timelineZoomPercent(timelineZoom)}
+              onChange={(e) =>
+                setTimelineZoom(Number(e.target.value) / 100)
+              }
+              aria-label="Timeline zoom"
+            />
+          </label>
           <span className="arrangement-zoom-value">
             {timelineZoomPercent(timelineZoom)}%
           </span>
           <button
             type="button"
-            onClick={() => setTimelineZoom(timelineZoom + 0.25)}
+            onClick={() => setTimelineZoom(adjustTimelineZoom(timelineZoom, "in"))}
             aria-label="Zoom timeline in"
           >
             +
           </button>
           <button type="button" onClick={resetTimelineZoom}>
             RESET
+          </button>
+        </div>
+        <div className="arrangement-lane-height-controls">
+          <span>LANES</span>
+          <button
+            type="button"
+            onClick={() =>
+              onLaneRowHeightChange(
+                clampLaneRowHeight(laneRowHeight - 4),
+              )
+            }
+            disabled={lanes.length === 0}
+            aria-label="Decrease lane height"
+          >
+            −
+          </button>
+          <label className="arrangement-sizing-slider">
+            <span className="visually-hidden">Lane row height</span>
+            <input
+              type="range"
+              min={MIN_LANE_ROW_HEIGHT}
+              max={MAX_LANE_ROW_HEIGHT}
+              step={2}
+              value={laneRowHeight}
+              disabled={lanes.length === 0}
+              onChange={(e) =>
+                onLaneRowHeightChange(Number(e.target.value))
+              }
+              aria-label="Lane row height"
+            />
+          </label>
+          <span className="arrangement-lane-height-value">{laneRowHeight}px</span>
+          <button
+            type="button"
+            onClick={() =>
+              onLaneRowHeightChange(
+                clampLaneRowHeight(laneRowHeight + 4),
+              )
+            }
+            disabled={lanes.length === 0}
+            aria-label="Increase lane height"
+          >
+            +
           </button>
         </div>
       </div>
@@ -464,7 +540,11 @@ export function ArrangementSection({
                 ))}
               </div>
 
-              <div className="arrangement-timeline-scroll">
+              <div
+                className="arrangement-timeline-scroll"
+                onWheel={handleTimelineWheel}
+                title="Ctrl or ⌘ + scroll to zoom timeline"
+              >
                 <div
                   className="arrangement-timeline-inner"
                   style={{ width: `${timelineWidthPx}px` }}

@@ -22,11 +22,14 @@ type Props = {
   compact?: boolean;
   onSelect: (id: string) => void;
   onDelete: (id: string) => void;
+  onDuplicate: (id: string) => void;
   onNameChange: (id: string, name: string) => void;
   onVolumeChange: (id: string, volume: number) => void;
   onTimeStretchChange: (id: string, timeStretch: number) => void;
   onReverseChange: (id: string, reverse: boolean) => void;
   onColorChange: (id: string, color: string) => void;
+  hasCopiedEffects?: boolean;
+  onPasteEffects?: (id: string) => void;
 };
 
 type ColorMenuState = {
@@ -43,11 +46,14 @@ export function ChopTable({
   compact = false,
   onSelect,
   onDelete,
+  onDuplicate,
   onNameChange,
   onVolumeChange,
   onTimeStretchChange,
   onReverseChange,
   onColorChange,
+  hasCopiedEffects = false,
+  onPasteEffects,
 }: Props) {
   const [colorMenu, setColorMenu] = useState<ColorMenuState | null>(null);
   const colorPopoverRef = useRef<HTMLDivElement | null>(null);
@@ -255,6 +261,32 @@ export function ChopTable({
                 </>
               )}
               <td className="chop-delete-cell">
+                {hasCopiedEffects && onPasteEffects && (
+                  <button
+                    type="button"
+                    className="chop-paste-effects-btn"
+                    aria-label={`Paste effects to chop ${index + 1}`}
+                    title="paste copied effects"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onPasteEffects(chop.id);
+                    }}
+                  >
+                    fx
+                  </button>
+                )}
+                <button
+                  type="button"
+                  className="chop-duplicate-btn"
+                  aria-label={`Duplicate chop ${index + 1}`}
+                  title="duplicate chop"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onDuplicate(chop.id);
+                  }}
+                >
+                  ⧉
+                </button>
                 <button
                   type="button"
                   className="chop-delete-btn"

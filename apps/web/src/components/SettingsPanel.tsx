@@ -1,11 +1,18 @@
 import type { MasterEffects } from "../lib/masterEffects";
 import type { Theme } from "../lib/theme";
+import type { TrackLayout } from "../lib/trackLayout";
+import type { BrutalStyle } from "../lib/brutalStyle";
+import {
+  MAX_BRUTAL_OFFSET,
+  MIN_BRUTAL_OFFSET,
+} from "../lib/brutalStyle";
 import { normalizeMasterEffects } from "../lib/masterEffects";
 import {
   MAX_UI_SCALE,
   MIN_UI_SCALE,
   uiScalePercent,
 } from "../lib/uiScale";
+import { EffectsControls } from "./EffectsControls";
 
 type Props = {
   theme: Theme;
@@ -19,22 +26,13 @@ type Props = {
   uiScale: number;
   onUiScaleChange: (scale: number) => void;
   onUiScaleReset: () => void;
+  trackLayout: TrackLayout;
+  onTrackLayoutChange: (layout: TrackLayout) => void;
+  brutalStyle: BrutalStyle;
+  onBrutalStyleChange: (patch: Partial<BrutalStyle>) => void;
   projectName: string;
   onClearSavedData: () => void;
 };
-
-function updateEffects(
-  current: MasterEffects,
-  patch: {
-    delay?: Partial<MasterEffects["delay"]>;
-    filter?: Partial<MasterEffects["filter"]>;
-  },
-): MasterEffects {
-  return normalizeMasterEffects({
-    delay: { ...current.delay, ...patch.delay },
-    filter: { ...current.filter, ...patch.filter },
-  });
-}
 
 export function SettingsPanel({
   theme,
@@ -48,11 +46,13 @@ export function SettingsPanel({
   uiScale,
   onUiScaleChange,
   onUiScaleReset,
+  trackLayout,
+  onTrackLayoutChange,
+  brutalStyle,
+  onBrutalStyleChange,
   projectName,
   onClearSavedData,
 }: Props) {
-  const { delay, filter } = masterEffects;
-
   return (
     <section className="settings-panel">
       <div className="settings-panel-header">
@@ -73,6 +73,23 @@ export function SettingsPanel({
           onClick={() => onThemeChange("dark")}
         >
           DARK
+        </button>
+      </div>
+      <div className="settings-palette-toggle">
+        <span>TRACKS</span>
+        <button
+          type="button"
+          className={trackLayout === "top" ? "active" : undefined}
+          onClick={() => onTrackLayoutChange("top")}
+        >
+          TOP
+        </button>
+        <button
+          type="button"
+          className={trackLayout === "side" ? "active" : undefined}
+          onClick={() => onTrackLayoutChange("side")}
+        >
+          SIDE
         </button>
       </div>
       <div className="settings-palette-toggle">
@@ -118,168 +135,111 @@ export function SettingsPanel({
         />
       </label>
 
-      <div className="settings-effects">
-        <h3>MASTER EFFECTS</h3>
-
-        <div className="settings-effect-block">
-          <div className="settings-palette-toggle">
-            <span>DELAY / ECHO</span>
-            <button
-              type="button"
-              className={delay.enabled ? "active" : undefined}
-              onClick={() =>
-                onMasterEffectsChange(
-                  updateEffects(masterEffects, {
-                    delay: { enabled: !delay.enabled },
-                  }),
-                )
-              }
-            >
-              {delay.enabled ? "ON" : "OFF"}
-            </button>
-          </div>
-          <label className="settings-slider-field">
-            <span>Time {delay.timeMs} ms</span>
-            <input
-              type="range"
-              min={10}
-              max={2000}
-              step={10}
-              value={delay.timeMs}
-              disabled={!delay.enabled}
-              onChange={(e) =>
-                onMasterEffectsChange(
-                  updateEffects(masterEffects, {
-                    delay: { timeMs: Number(e.target.value) },
-                  }),
-                )
-              }
-            />
-          </label>
-          <label className="settings-slider-field">
-            <span>Feedback {Math.round(delay.feedback * 100)}%</span>
-            <input
-              type="range"
-              min={0}
-              max={95}
-              step={1}
-              value={Math.round(delay.feedback * 100)}
-              disabled={!delay.enabled}
-              onChange={(e) =>
-                onMasterEffectsChange(
-                  updateEffects(masterEffects, {
-                    delay: { feedback: Number(e.target.value) / 100 },
-                  }),
-                )
-              }
-            />
-          </label>
-          <label className="settings-slider-field">
-            <span>Mix {Math.round(delay.mix * 100)}%</span>
-            <input
-              type="range"
-              min={0}
-              max={100}
-              step={1}
-              value={Math.round(delay.mix * 100)}
-              disabled={!delay.enabled}
-              onChange={(e) =>
-                onMasterEffectsChange(
-                  updateEffects(masterEffects, {
-                    delay: { mix: Number(e.target.value) / 100 },
-                  }),
-                )
-              }
-            />
-          </label>
+      <div className="settings-brutal-section">
+        <div className="settings-palette-toggle">
+          <span>BRUTAL</span>
+          <button
+            type="button"
+            className={brutalStyle.enabled ? "active" : undefined}
+            onClick={() => onBrutalStyleChange({ enabled: true })}
+          >
+            ON
+          </button>
+          <button
+            type="button"
+            className={!brutalStyle.enabled ? "active" : undefined}
+            onClick={() => onBrutalStyleChange({ enabled: false })}
+          >
+            OFF
+          </button>
         </div>
-
-        <div className="settings-effect-block">
-          <div className="settings-palette-toggle">
-            <span>FILTER</span>
-            <button
-              type="button"
-              className={filter.enabled ? "active" : undefined}
-              onClick={() =>
-                onMasterEffectsChange(
-                  updateEffects(masterEffects, {
-                    filter: { enabled: !filter.enabled },
-                  }),
-                )
-              }
-            >
-              {filter.enabled ? "ON" : "OFF"}
-            </button>
-          </div>
-          <div className="settings-palette-toggle">
-            <span>TYPE</span>
-            <button
-              type="button"
-              className={filter.type === "lowpass" ? "active" : undefined}
-              disabled={!filter.enabled}
-              onClick={() =>
-                onMasterEffectsChange(
-                  updateEffects(masterEffects, {
-                    filter: { type: "lowpass" },
-                  }),
-                )
-              }
-            >
-              LOW
-            </button>
-            <button
-              type="button"
-              className={filter.type === "highpass" ? "active" : undefined}
-              disabled={!filter.enabled}
-              onClick={() =>
-                onMasterEffectsChange(
-                  updateEffects(masterEffects, {
-                    filter: { type: "highpass" },
-                  }),
-                )
-              }
-            >
-              HIGH
-            </button>
-          </div>
-          <label className="settings-slider-field">
-            <span>Cutoff {Math.round(filter.cutoffHz)} Hz</span>
-            <input
-              type="range"
-              min={20}
-              max={20000}
-              step={1}
-              value={filter.cutoffHz}
-              disabled={!filter.enabled}
-              onChange={(e) =>
-                onMasterEffectsChange(
-                  updateEffects(masterEffects, {
-                    filter: { cutoffHz: Number(e.target.value) },
-                  }),
-                )
-              }
-            />
-          </label>
-          <label className="settings-slider-field">
-            <span>Resonance {filter.resonance.toFixed(1)}</span>
-            <input
-              type="range"
-              min={0.1}
-              max={18}
-              step={0.1}
-              value={filter.resonance}
-              disabled={!filter.enabled}
-              onChange={(e) =>
-                onMasterEffectsChange(
-                  updateEffects(masterEffects, {
-                    filter: { resonance: Number(e.target.value) },
-                  }),
-                )
-              }
-            />
-          </label>
-        </div>
+        {brutalStyle.enabled && (
+          <>
+            <label className="settings-slider-field">
+              <span>3D OFFSET {brutalStyle.offsetHeight}px</span>
+              <input
+                type="range"
+                min={MIN_BRUTAL_OFFSET}
+                max={MAX_BRUTAL_OFFSET}
+                step={1}
+                value={brutalStyle.offsetHeight}
+                onChange={(e) =>
+                  onBrutalStyleChange({ offsetHeight: Number(e.target.value) })
+                }
+              />
+            </label>
+            <label className="settings-slider-field">
+              <span>3D ANGLE {brutalStyle.angle}°</span>
+              <input
+                type="range"
+                min={0}
+                max={359}
+                step={1}
+                value={brutalStyle.angle}
+                onChange={(e) =>
+                  onBrutalStyleChange({ angle: Number(e.target.value) })
+                }
+              />
+            </label>
+            <label className="settings-color-field">
+              3D border color
+              <input
+                type="color"
+                value={brutalStyle.backgroundColor1}
+                onChange={(e) =>
+                  onBrutalStyleChange({ backgroundColor1: e.target.value })
+                }
+              />
+            </label>
+            <div className="settings-palette-toggle">
+              <span>BORDER FADE</span>
+              <button
+                type="button"
+                className={
+                  brutalStyle.backgroundColor2 === null ? "active" : undefined
+                }
+                onClick={() => onBrutalStyleChange({ backgroundColor2: null })}
+              >
+                1 COLOR
+              </button>
+              <button
+                type="button"
+                className={
+                  brutalStyle.backgroundColor2 !== null ? "active" : undefined
+                }
+                onClick={() =>
+                  onBrutalStyleChange({
+                    backgroundColor2:
+                      brutalStyle.backgroundColor2 ?? "#ffffff",
+                  })
+                }
+              >
+                2 COLORS
+              </button>
+            </div>
+            {brutalStyle.backgroundColor2 !== null && (
+              <label className="settings-color-field">
+                3D border fade color
+                <input
+                  type="color"
+                  value={brutalStyle.backgroundColor2}
+                  onChange={(e) =>
+                    onBrutalStyleChange({ backgroundColor2: e.target.value })
+                  }
+                />
+              </label>
+            )}
+          </>
+        )}
       </div>
+
+      <EffectsControls
+        effects={masterEffects}
+        onChange={(effects) =>
+          onMasterEffectsChange(normalizeMasterEffects(effects))
+        }
+        title="MASTER EFFECTS"
+      />
 
       <p className="hint">
         Clears tracks, chops, saved audio, session preferences, and MIDI pad

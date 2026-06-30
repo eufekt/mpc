@@ -94,7 +94,7 @@ function normalizeSavedChops(
         ? chop.name.trim()
         : undefined;
     return {
-      id: chop.id ?? `chop-${index}`,
+      id: chop.id ?? crypto.randomUUID(),
       start: chop.start ?? 0,
       end: chop.end ?? 0,
       key: demigratePadKey(chop.key ?? null),
@@ -106,6 +106,7 @@ function normalizeSavedChops(
           ? normalizeTimeStretch(chop.timeStretch)
           : 1,
       reverse: chop.reverse === true,
+      effects: normalizeMasterEffects(chop.effects),
     };
   });
 }

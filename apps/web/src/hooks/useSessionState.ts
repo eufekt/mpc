@@ -25,7 +25,7 @@ import type {
 } from "../lib/types";
 import { createTrackId } from "../lib/trackIds";
 import { DEFAULT_ACCENT_COLOR } from "../lib/transport";
-import { DEFAULT_MASTER_EFFECTS, type MasterEffects } from "../lib/masterEffects";
+import { DEFAULT_MASTER_EFFECTS, normalizeMasterEffects, type MasterEffects } from "../lib/masterEffects";
 import { defaultMusicalTime, normalizeMusicalTime, snapTime } from "../lib/musicalTime";
 
 export function createTrack(
@@ -90,6 +90,7 @@ type SessionAction =
   | { type: "setActiveTrack"; trackId: string | null }
   | { type: "updateChops"; trackId: string; chops: Chop[] }
   | { type: "deleteChop"; trackId: string; chopId: string }
+  | { type: "duplicateChop"; trackId: string; chopId: string; newChopId: string }
   | { type: "updateChop"; trackId: string; chopId: string; patch: Partial<Chop> }
   | { type: "bindKey"; trackId: string; chopId: string; key: string }
   | { type: "setPaletteMode"; mode: PaletteMode }
@@ -258,6 +259,37 @@ function sessionReducer(
           })),
         },
       };
+    case "duplicateChop": {
+      const track = state.tracks.find((t) => t.id === action.trackId);
+      if (!track) return state;
+      const chopIndex = track.chops.findIndex((c) => c.id === action.chopId);
+      if (chopIndex === -1) return state;
+      const source = track.chops[chopIndex];
+      const trimmedName = source.name?.trim();
+      const duplicate: Chop = {
+        id: action.newChopId,
+        start: source.start,
+        end: source.end,
+        key: null,
+        name: trimmedName ? `${trimmedName} copy` : undefined,
+        color: source.color,
+        volume: source.volume,
+        timeStretch: source.timeStretch,
+        reverse: source.reverse,
+        effects: normalizeMasterEffects(source.effects),
+      };
+      const chops = [
+        ...track.chops.slice(0, chopIndex + 1),
+        duplicate,
+        ...track.chops.slice(chopIndex + 1),
+      ];
+      return {
+        ...state,
+        tracks: state.tracks.map((t) =>
+          t.id === action.trackId ? { ...t, chops } : t,
+        ),
+      };
+    }
     case "updateChop":
       return {
         ...state,
@@ -532,6 +564,12 @@ export function useSessionState() {
     dispatch({ type: "deleteChop", trackId, chopId });
   }, []);
 
+  const duplicateChop = useCallback((trackId: string, chopId: string) => {
+    const newChopId = crypto.randomUUID();
+    dispatch({ type: "duplicateChop", trackId, chopId, newChopId });
+    return newChopId;
+  }, []);
+
   const updateChop = useCallback(
     (trackId: string, chopId: string, patch: Partial<Chop>) => {
       const normalized = { ...patch };
@@ -544,6 +582,9 @@ export function useSessionState() {
       if (typeof normalized.name === "string") {
         const trimmed = normalized.name.trim();
         normalized.name = trimmed || undefined;
+      }
+      if (normalized.effects !== undefined) {
+        normalized.effects = normalizeMasterEffects(normalized.effects);
       }
       dispatch({ type: "updateChop", trackId, chopId, patch: normalized });
     },
@@ -702,6 +743,7 @@ export function useSessionState() {
     setActiveTrack,
     updateChops,
     deleteChop,
+    duplicateChop,
     updateChop,
     bindKey,
     setPaletteMode,

@@ -14,6 +14,7 @@ import {
   computeChopStackLayout,
 } from "../lib/chopOverlapLayout";
 import type { Chop } from "../lib/types";
+import { DEFAULT_MASTER_EFFECTS } from "../lib/masterEffects";
 import { formatTimePrecise } from "../lib/timeFormat";
 import type { Theme } from "../lib/theme";
 import { getThemeColors } from "../lib/theme";
@@ -373,6 +374,7 @@ export function WaveformEditor({
           volume: 1,
           timeStretch: 1,
           reverse: false,
+          effects: DEFAULT_MASTER_EFFECTS,
         },
       ]);
     };

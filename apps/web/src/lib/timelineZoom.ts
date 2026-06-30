@@ -1,7 +1,9 @@
 export const TIMELINE_ZOOM_STORAGE_KEY = "mpc-timeline-zoom";
 export const DEFAULT_TIMELINE_ZOOM = 1;
-export const MIN_TIMELINE_ZOOM = 0.25;
-export const MAX_TIMELINE_ZOOM = 4;
+export const MIN_TIMELINE_ZOOM = 0.125;
+export const MAX_TIMELINE_ZOOM = 16;
+/** Multiplicative step for +/- buttons and ctrl/meta + wheel. */
+export const TIMELINE_ZOOM_STEP_FACTOR = 1.15;
 
 export function clampTimelineZoom(zoom: number): number {
   if (!Number.isFinite(zoom)) return DEFAULT_TIMELINE_ZOOM;
@@ -38,4 +40,10 @@ export function persistTimelineZoom(zoom: number): void {
 
 export function timelineZoomPercent(zoom: number): number {
   return Math.round(clampTimelineZoom(zoom) * 100);
+}
+
+export function adjustTimelineZoom(zoom: number, direction: "in" | "out"): number {
+  const factor =
+    direction === "in" ? TIMELINE_ZOOM_STEP_FACTOR : 1 / TIMELINE_ZOOM_STEP_FACTOR;
+  return clampTimelineZoom(zoom * factor);
 }
