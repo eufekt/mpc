@@ -27,6 +27,7 @@ type Props = {
   loopEdgeSnap: LoopEdgeSnap;
   contentBounds: ArrangementLoopBounds | null;
   arrangementDuration: number;
+  maxLoopDuration: number;
   pxPerSecond: number;
   topPx: number;
   heightPx: number;
@@ -42,6 +43,7 @@ export function ArrangementLoopRegion({
   loopEdgeSnap,
   contentBounds,
   arrangementDuration,
+  maxLoopDuration,
   pxPerSecond,
   topPx,
   heightPx,
@@ -49,11 +51,12 @@ export function ArrangementLoopRegion({
   musicalTime,
   onChange,
 }: Props) {
-  const resolvedRegion = resolveLoopBounds(loopRegion, arrangementDuration, {
+  const resolvedRegion = resolveLoopBounds(loopRegion, maxLoopDuration, {
     loopMode,
     loopBeats,
     bpm: musicalTime?.bpm,
     contentBounds,
+    contentExtent: arrangementDuration,
   });
   const dragRef = useRef<{
     edge: "start" | "end";
@@ -73,10 +76,10 @@ export function ArrangementLoopRegion({
   const commitRegion = useCallback(
     (start: number, end: number) => {
       onChange(
-        normalizeLoopRegion({ start, end }, arrangementDuration),
+        normalizeLoopRegion({ start, end }, maxLoopDuration, arrangementDuration),
       );
     },
-    [arrangementDuration, onChange],
+    [arrangementDuration, maxLoopDuration, onChange],
   );
 
   const snapLoopTime = useCallback(

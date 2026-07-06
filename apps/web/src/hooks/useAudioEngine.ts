@@ -10,10 +10,51 @@ import {
 } from "../lib/masterEffects";
 import { pitchRatioFromSemitones } from "../lib/music";
 import { playFrom, playSlice, playSliceLoop } from "../lib/sliceAudioBuffer";
+import { getStretchedSlice } from "../lib/stretchRender";
 import type { ChopPlayRequest, PadMode } from "../lib/types";
 
 function effectivePlaybackRate(req: ChopPlayRequest): number {
   return req.timeStretch * pitchRatioFromSemitones(req.pitchSemitones ?? 0);
+}
+
+type PlayableSlice = {
+  buffer: AudioBuffer;
+  start: number;
+  end: number;
+  rate: number;
+};
+
+/**
+ * Resolve buffer + rate for a request. Tempo-mode chops play a pre-rendered
+ * pitch-preserved buffer at rate 1 (plus keyboard pitch); falls back to
+ * repitch when the render is not cached yet.
+ */
+function resolvePlayableSlice(
+  req: ChopPlayRequest,
+  buffer: AudioBuffer,
+): PlayableSlice {
+  if (req.stretchMode === "tempo" && req.timeStretch !== 1) {
+    const stretched = getStretchedSlice(req.trackId, {
+      id: req.chopId,
+      start: req.start,
+      end: req.end,
+      timeStretch: req.timeStretch,
+    });
+    if (stretched) {
+      return {
+        buffer: stretched,
+        start: 0,
+        end: stretched.duration,
+        rate: pitchRatioFromSemitones(req.pitchSemitones ?? 0),
+      };
+    }
+  }
+  return {
+    buffer,
+    start: req.start,
+    end: req.end,
+    rate: effectivePlaybackRate(req),
+  };
 }
 
 type ActivePlayback = {
@@ -524,16 +565,16 @@ export function useAudioEngine() {
         for (const req of requests) {
           const buffer = buffersRef.current.get(req.trackId);
           if (!buffer) continue;
-          const rate = effectivePlaybackRate(req);
+          const slice = resolvePlayableSlice(req, buffer);
           const chopFx = createChopEffectsInsert(ctx, gain, req.effects);
           const source = playSliceLoop(
             ctx,
-            buffer,
-            req.start,
-            req.end,
+            slice.buffer,
+            slice.start,
+            slice.end,
             chopFx.input,
             req.volume,
-            rate,
+            slice.rate,
             req.reverse,
           );
           registerChopFx(
@@ -580,17 +621,17 @@ export function useAudioEngine() {
           stopPad(req.trackId, req.key);
         }
 
-        const rate = effectivePlaybackRate(req);
+        const slice = resolvePlayableSlice(req, buffer);
         const chopFx = createChopEffectsInsert(ctx, gain, req.effects);
         const source = playSlice(
           ctx,
-          buffer,
-          req.start,
-          req.end,
+          slice.buffer,
+          slice.start,
+          slice.end,
           chopFx.input,
           req.volume,
           0,
-          rate,
+          slice.rate,
           req.reverse,
         );
         registerChopFx(

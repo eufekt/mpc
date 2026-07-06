@@ -808,6 +808,46 @@ pre {
   gap: 8px;
 }
 
+.track-panel-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  font-size: 11px;
+  text-transform: uppercase;
+}
+
+.track-panel-bpm {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.track-panel-bpm input {
+  width: 56px;
+}
+
+.track-panel-snap {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.track-panel-autochop {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.chop-inspector-beats {
+  font-size: 11px;
+}
+
+.chop-inspector-stretch-mode {
+  display: flex;
+  gap: 4px;
+}
+
 .midi-panel {
   border: 1px solid var(--border);
   padding: 8px;

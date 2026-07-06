@@ -21,6 +21,7 @@ import type {
 
 type Props = {
   duration: number;
+  maxLoopDuration: number;
   arrangementDuration: number;
   pxPerSecond: number;
   musicalTime: MusicalTimeSettings;
@@ -33,6 +34,7 @@ const DRAG_THRESHOLD_PX = 3;
 
 export function ArrangementTimelineRuler({
   duration,
+  maxLoopDuration,
   arrangementDuration,
   pxPerSecond,
   musicalTime,
@@ -102,6 +104,7 @@ export function ArrangementTimelineRuler({
         const end = Math.max(drag.anchorTime, time);
         const preview = normalizeLoopRegion(
           { start, end },
+          maxLoopDuration,
           arrangementDuration,
         );
         selectPreviewRef.current = preview;
@@ -126,7 +129,7 @@ export function ArrangementTimelineRuler({
       window.addEventListener("pointermove", onMove);
       window.addEventListener("pointerup", onUp);
     },
-    [applyLoopSnap, applySeekSnap, arrangementDuration, onLoopRegionChange, onSeek, toTime],
+    [applyLoopSnap, applySeekSnap, arrangementDuration, maxLoopDuration, onLoopRegionChange, onSeek, toTime],
   );
 
   const handleClick = (e: React.MouseEvent<HTMLDivElement>) => {

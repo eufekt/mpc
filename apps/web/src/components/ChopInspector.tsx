@@ -7,7 +7,12 @@ import {
   percentToTimeStretch,
   timeStretchToPercent,
 } from "../lib/arrangement";
-import type { Chop, Track } from "../lib/types";
+import {
+  chopLengthInBeats,
+  fitTimeStretch,
+  formatBeatsLabel,
+} from "../lib/beatFit";
+import type { Chop, ChopStretchMode, Track } from "../lib/types";
 import { DEFAULT_MASTER_EFFECTS, type MasterEffects } from "../lib/masterEffects";
 import { formatTimePrecise } from "../lib/timeFormat";
 import { EffectsControls } from "./EffectsControls";
@@ -17,9 +22,11 @@ type Props = {
   chop: Chop;
   chopIndex: number;
   paletteMode: PaletteMode;
+  projectBpm: number;
   onNameChange: (name: string) => void;
   onVolumeChange: (volume: number) => void;
   onTimeStretchChange: (timeStretch: number) => void;
+  onStretchModeChange: (stretchMode: ChopStretchMode) => void;
   onReverseChange: (reverse: boolean) => void;
   onEffectsChange: (effects: MasterEffects) => void;
   hasCopiedEffects: boolean;
@@ -36,9 +43,11 @@ export function ChopInspector({
   chop,
   chopIndex,
   paletteMode,
+  projectBpm,
   onNameChange,
   onVolumeChange,
   onTimeStretchChange,
+  onStretchModeChange,
   onReverseChange,
   onEffectsChange,
   hasCopiedEffects,
@@ -152,6 +161,55 @@ export function ChopInspector({
           }}
         />
       </label>
+
+      <div className="chop-inspector-field">
+        <span>STRETCH</span>
+        <div className="chop-inspector-stretch-mode">
+          <button
+            type="button"
+            className={chop.stretchMode !== "tempo" ? "active" : undefined}
+            title="Classic sampler stretch — pitch follows speed"
+            onClick={() => onStretchModeChange("repitch")}
+          >
+            REPITCH
+          </button>
+          <button
+            type="button"
+            className={chop.stretchMode === "tempo" ? "active" : undefined}
+            title="Time-stretch — speed changes without altering pitch"
+            onClick={() => onStretchModeChange("tempo")}
+          >
+            TEMPO
+          </button>
+        </div>
+      </div>
+
+      <div className="chop-inspector-field">
+        <span>BEATS</span>
+        {typeof track.sourceBpm === "number" ? (
+          <>
+            <span className="chop-inspector-beats">
+              {formatBeatsLabel(chopLengthInBeats(chop, track.sourceBpm))} @{" "}
+              {Math.round(track.sourceBpm)} bpm
+            </span>
+            <button
+              type="button"
+              onClick={() =>
+                onTimeStretchChange(
+                  fitTimeStretch(track.sourceBpm!, projectBpm),
+                )
+              }
+              title={`Set speed so this chop plays at the project tempo (${Math.round(projectBpm)} BPM)`}
+            >
+              FIT TO {Math.round(projectBpm)} BPM
+            </button>
+          </>
+        ) : (
+          <p className="hint chop-inspector-hint">
+            set track BPM to fit chops to the project tempo
+          </p>
+        )}
+      </div>
 
       <label className="chop-inspector-field chop-inspector-check">
         <input

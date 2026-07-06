@@ -127,6 +127,8 @@ export type ResolveLoopBoundsOptions = {
   bpm?: number;
   /** Span of placed clips — gaps between clips are included. */
   contentBounds?: ArrangementLoopBounds | null;
+  /** Clip extent — used for content mode and content-bound clamping (defaults to maxLoopDuration). */
+  contentExtent?: number;
 };
 
 function clampLoopBounds(
@@ -144,17 +146,18 @@ function clampLoopBounds(
 
 export function resolveLoopBounds(
   loopRegion: ArrangementLoopBounds | null | undefined,
-  arrangementDuration: number,
+  maxLoopDuration: number,
   options?: ResolveLoopBoundsOptions,
 ): ArrangementLoopBounds {
-  const duration = Math.max(0, arrangementDuration);
-  if (duration <= 0) return { start: 0, end: 0 };
+  const maxDuration = Math.max(0, maxLoopDuration);
+  const contentExtent = Math.max(0, options?.contentExtent ?? maxDuration);
+  if (maxDuration <= 0) return { start: 0, end: 0 };
 
   const mode = options?.loopMode ?? "region";
   const contentBounds = options?.contentBounds ?? null;
   const contentEnd = contentBounds
-    ? Math.min(duration, Math.max(0, contentBounds.end))
-    : duration;
+    ? Math.min(contentExtent, Math.max(0, contentBounds.end))
+    : contentExtent;
   const contentStart = contentBounds
     ? Math.max(0, Math.min(contentBounds.start, contentEnd))
     : 0;
@@ -172,35 +175,46 @@ export function resolveLoopBounds(
       return clampLoopBounds(
         0,
         Math.max(beatEnd, MIN_LOOP_REGION_SECONDS),
-        duration,
+        maxDuration,
       );
     }
-    return clampLoopBounds(contentStart, contentEnd, duration);
+    return clampLoopBounds(contentStart, contentEnd, contentExtent);
   }
 
   if (mode === "content") {
     if (contentBounds && contentEnd > contentStart) {
-      return clampLoopBounds(contentStart, contentEnd, duration);
+      return clampLoopBounds(contentStart, contentEnd, contentExtent);
     }
-    return clampLoopBounds(0, duration, duration);
+    return clampLoopBounds(0, contentExtent, contentExtent);
   }
 
   if (loopRegion) {
-    return clampLoopBounds(loopRegion.start, loopRegion.end, duration);
+    return clampLoopBounds(loopRegion.start, loopRegion.end, maxDuration);
   }
 
   if (contentBounds && contentEnd > contentStart) {
-    return clampLoopBounds(contentStart, contentEnd, duration);
+    return clampLoopBounds(contentStart, contentEnd, maxDuration);
   }
 
-  return clampLoopBounds(0, duration, duration);
+  return clampLoopBounds(0, contentExtent, maxDuration);
+}
+
+/** Scrollable timeline extent — loop regions may extend past the last clip for trailing breaks. */
+export function computeMaxLoopRegionDuration(
+  arrangementDuration: number,
+): number {
+  return computeTimelineScrollDuration(arrangementDuration);
 }
 
 export function normalizeLoopRegion(
   region: ArrangementLoopBounds,
-  arrangementDuration: number,
+  maxLoopDuration: number,
+  contentExtent?: number,
 ): ArrangementLoopBounds {
-  return resolveLoopBounds(region, arrangementDuration);
+  return resolveLoopBounds(region, maxLoopDuration, {
+    loopMode: "region",
+    contentExtent,
+  });
 }
 
 export function filterLoadedTracks(

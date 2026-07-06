@@ -1,6 +1,7 @@
 import type { PaletteMode } from "./chopColors";
 import { clearMidiBindings } from "./midiMappings";
 import { getColorForIndex } from "./chopColors";
+import { normalizeBeatOffset, normalizeSourceBpm } from "./beatFit";
 import { normalizeTimeStretch } from "./chopPlayback";
 import {
   loadProjectsIndex,
@@ -31,6 +32,7 @@ import {
 import {
   clampLaneRowHeight,
   computeArrangementDuration,
+  computeMaxLoopRegionDuration,
   DEFAULT_LANE_ROW_HEIGHT,
   normalizeLoopRegion,
 } from "./arrangement";
@@ -110,6 +112,9 @@ function normalizeSavedChops(
         typeof chop.timeStretch === "number"
           ? normalizeTimeStretch(chop.timeStretch)
           : 1,
+      ...(chop.stretchMode === "tempo"
+        ? { stretchMode: "tempo" as const }
+        : {}),
       reverse: chop.reverse === true,
       effects: normalizeMasterEffects(chop.effects),
     };
@@ -178,6 +183,7 @@ function normalizeLoopRegionField(
   }
   return normalizeLoopRegion(
     { start: loopRegion.start, end: loopRegion.end },
+    computeMaxLoopRegionDuration(arrangementDuration),
     arrangementDuration,
   );
 }
@@ -290,6 +296,8 @@ function parseTracks(
     sourceName: track.sourceName ?? "unknown",
     sourceUrl: track.sourceUrl,
     chops: normalizeSavedChops(track.chops ?? [], paletteMode),
+    sourceBpm: normalizeSourceBpm(track.sourceBpm),
+    beatOffset: normalizeBeatOffset(track.beatOffset),
   }));
 }
 

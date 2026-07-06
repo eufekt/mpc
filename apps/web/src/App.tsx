@@ -42,9 +42,14 @@ import {
 } from "./lib/trackNames";
 import { deleteTrackAudio } from "./lib/sessionPersistence";
 import {
+  ensureAllStretchedSlices,
+  pruneStretchCache,
+} from "./lib/stretchRender";
+import {
   DEFAULT_MASTER_EFFECTS,
   type MasterEffects,
 } from "./lib/masterEffects";
+import type { ChopStretchMode } from "./lib/types";
 import {
   getAssignedKeys,
   getChopsForKey,
@@ -97,6 +102,7 @@ export default function App() {
     addTrack,
     removeTrack,
     renameTrack,
+    updateTrack,
     setActiveTrack,
     updateChops,
     deleteChop,
@@ -195,8 +201,14 @@ export default function App() {
   const playArrangement = useCallback(async () => {
     engine.stopAllPlayback();
     engine.stopLoop();
+    // Make sure tempo-mode chops have their pitch-preserved renders ready.
+    await ensureAllStretchedSlices(
+      engine.getContext(),
+      session.tracks,
+      engine.getBuffer,
+    );
     await arrangementPlayer.play();
-  }, [arrangementPlayer, engine]);
+  }, [arrangementPlayer, engine, session.tracks]);
 
   const toggleArrangementPlayback = useCallback(async () => {
     if (arrangementPlayer.isPlaying) {
@@ -207,6 +219,20 @@ export default function App() {
   }, [arrangementPlayer, playArrangement]);
 
   const hasAudio = engine.loadedTrackIds.length > 0;
+
+  // Keep pitch-preserved renders warm — debounced so SPEED edits don't
+  // re-render on every keystroke.
+  useEffect(() => {
+    const id = window.setTimeout(() => {
+      pruneStretchCache(session.tracks);
+      void ensureAllStretchedSlices(
+        engine.getContext(),
+        session.tracks,
+        engine.getBuffer,
+      );
+    }, 200);
+    return () => window.clearTimeout(id);
+  }, [session.tracks, engine.loadedTrackIds, engine]);
 
   const loadedTracks = useMemo(
     () => filterLoadedTracks(session.tracks, engine.loadedTrackIds),
@@ -525,6 +551,7 @@ export default function App() {
             key: `kb${midiNote}`,
             volume: chop.volume,
             timeStretch: chop.timeStretch,
+            stretchMode: chop.stretchMode,
             reverse: chop.reverse,
             pitchSemitones: semitoneOffset(rootMidiNote, midiNote),
             effects: chop.effects ?? DEFAULT_MASTER_EFFECTS,
@@ -800,6 +827,15 @@ export default function App() {
   const handleChopReverseChange = useCallback(
     (trackId: string, chopId: string, reverse: boolean) => {
       updateChop(trackId, chopId, { reverse });
+    },
+    [updateChop],
+  );
+
+  const handleChopStretchModeChange = useCallback(
+    (trackId: string, chopId: string, stretchMode: ChopStretchMode) => {
+      updateChop(trackId, chopId, {
+        stretchMode: stretchMode === "tempo" ? "tempo" : undefined,
+      });
     },
     [updateChop],
   );
@@ -1203,6 +1239,7 @@ export default function App() {
                     onPasteChopEffects={handlePasteChopEffects}
                     onRemoveTrack={handleRemoveTrack}
                     onRenameTrack={handleRenameTrack}
+                    onUpdateTrack={updateTrack}
                     transportFocused={
                       transportFocus.type === "track" &&
                       transportFocus.trackId === activeLoadedTrack.id
@@ -1320,6 +1357,9 @@ export default function App() {
                 chop={inspectorChop.chop}
                 chopIndex={inspectorChop.chopIndex}
                 paletteMode={session.paletteMode}
+                projectBpm={
+                  normalizeMusicalTime(session.arrangement.musicalTime).bpm
+                }
                 onNameChange={(name) =>
                   handleChopNameChange(
                     inspectorChop.track.id,
@@ -1339,6 +1379,13 @@ export default function App() {
                     inspectorChop.track.id,
                     inspectorChop.chop.id,
                     timeStretch,
+                  )
+                }
+                onStretchModeChange={(stretchMode) =>
+                  handleChopStretchModeChange(
+                    inspectorChop.track.id,
+                    inspectorChop.chop.id,
+                    stretchMode,
                   )
                 }
                 onReverseChange={(reverse) =>

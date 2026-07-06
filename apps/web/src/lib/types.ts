@@ -1,6 +1,9 @@
 import type { PaletteMode } from "./chopColors";
 import type { MasterEffects } from "./masterEffects";
 
+/** repitch = classic playbackRate (pitch follows speed); tempo = pitch-preserved stretch. */
+export type ChopStretchMode = "repitch" | "tempo";
+
 export type Chop = {
   id: string;
   start: number;
@@ -12,6 +15,8 @@ export type Chop = {
   volume: number;
   /** Playback speed multiplier — 1.000 = normal, 0.900 = 0.9× speed. */
   timeStretch: number;
+  /** How timeStretch is applied — absent means repitch. */
+  stretchMode?: ChopStretchMode;
   /** When true, chop plays from end to start. */
   reverse: boolean;
   /** Per-chop insert — applied before the session master effects bus. */
@@ -29,6 +34,10 @@ export type Track = {
   sourceName: string;
   sourceUrl?: string;
   chops: Chop[];
+  /** Detected or user-entered tempo of the source audio. */
+  sourceBpm?: number;
+  /** Seconds from buffer start to the first beat. */
+  beatOffset?: number;
 };
 
 export type ArrangementLaneMode = "clamped" | "free";
@@ -135,6 +144,8 @@ export type ChopPlayRequest = {
   key: string;
   volume: number;
   timeStretch: number;
+  /** How timeStretch is applied — absent means repitch. */
+  stretchMode?: ChopStretchMode;
   reverse: boolean;
   /** Semitone offset from the chop's natural pitch (keyboard mode). */
   pitchSemitones?: number;

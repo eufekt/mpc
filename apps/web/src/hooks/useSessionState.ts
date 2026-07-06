@@ -10,6 +10,7 @@ import {
   DEFAULT_LANE_ROW_HEIGHT,
   clampLaneRowHeight,
 } from "../lib/arrangement";
+import { normalizeBeatOffset, normalizeSourceBpm } from "../lib/beatFit";
 import { getChopNaturalDuration, getChopPlaybackDuration, normalizeTimeStretch } from "../lib/chopPlayback";
 import { assignColorsToChops, type PaletteMode } from "../lib/chopColors";
 import type {
@@ -92,6 +93,11 @@ type SessionAction =
   | { type: "addTrack"; track: Track }
   | { type: "removeTrack"; trackId: string }
   | { type: "renameTrack"; trackId: string; name: string }
+  | {
+      type: "updateTrack";
+      trackId: string;
+      patch: Partial<Pick<Track, "sourceBpm" | "beatOffset">>;
+    }
   | { type: "setActiveTrack"; trackId: string | null }
   | { type: "updateChops"; trackId: string; chops: Chop[] }
   | { type: "deleteChop"; trackId: string; chopId: string }
@@ -226,6 +232,13 @@ function sessionReducer(
           t.id === action.trackId ? { ...t, name: action.name } : t,
         ),
       };
+    case "updateTrack":
+      return {
+        ...state,
+        tracks: state.tracks.map((t) =>
+          t.id === action.trackId ? { ...t, ...action.patch } : t,
+        ),
+      };
     case "setActiveTrack":
       return { ...state, activeTrackId: action.trackId };
     case "updateChops":
@@ -283,6 +296,7 @@ function sessionReducer(
         color: source.color,
         volume: source.volume,
         timeStretch: source.timeStretch,
+        stretchMode: source.stretchMode,
         reverse: source.reverse,
         effects: normalizeMasterEffects(source.effects),
       };
@@ -586,6 +600,23 @@ export function useSessionState() {
     dispatch({ type: "renameTrack", trackId, name });
   }, []);
 
+  const updateTrack = useCallback(
+    (
+      trackId: string,
+      patch: Partial<Pick<Track, "sourceBpm" | "beatOffset">>,
+    ) => {
+      const normalized = { ...patch };
+      if ("sourceBpm" in normalized) {
+        normalized.sourceBpm = normalizeSourceBpm(normalized.sourceBpm);
+      }
+      if ("beatOffset" in normalized) {
+        normalized.beatOffset = normalizeBeatOffset(normalized.beatOffset);
+      }
+      dispatch({ type: "updateTrack", trackId, patch: normalized });
+    },
+    [],
+  );
+
   const setActiveTrack = useCallback((trackId: string | null) => {
     dispatch({ type: "setActiveTrack", trackId });
   }, []);
@@ -786,6 +817,7 @@ export function useSessionState() {
     addTrack,
     removeTrack,
     renameTrack,
+    updateTrack,
     setActiveTrack,
     updateChops,
     deleteChop,

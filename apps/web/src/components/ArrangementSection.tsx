@@ -3,12 +3,14 @@ import {
   clampLaneRowHeight,
   computeArrangementContentBounds,
   computeArrangementDuration,
+  computeMaxLoopRegionDuration,
   computeTimelineLaneAreaHeight,
   computeTimelineScrollDuration,
   computeTimelineWidthPx,
   filterLoadedTracks,
   formatDuration,
   getAllChops,
+  normalizeLoopRegion,
   ARRANGEMENT_RULER_HEIGHT,
   MAX_LANE_ROW_HEIGHT,
   MIN_LANE_ROW_HEIGHT,
@@ -247,6 +249,11 @@ export function ArrangementSection({
     [lanes, loadedTracks],
   );
 
+  const maxLoopDuration = useMemo(
+    () => computeMaxLoopRegionDuration(arrangementDuration),
+    [arrangementDuration],
+  );
+
   const contentBounds = useMemo(
     () => computeArrangementContentBounds(lanes, loadedTracks),
     [lanes, loadedTracks],
@@ -258,9 +265,11 @@ export function ArrangementSection({
 
   const handleLoopRegionChange = useCallback(
     (region: LoopRegion) => {
-      onLoopRegionChange(region);
+      onLoopRegionChange(
+        normalizeLoopRegion(region, maxLoopDuration, arrangementDuration),
+      );
     },
-    [onLoopRegionChange],
+    [arrangementDuration, maxLoopDuration, onLoopRegionChange],
   );
 
   const handleFitLoopToContent = useCallback(() => {
@@ -674,6 +683,7 @@ export function ArrangementSection({
                   <div className="arrangement-timeline-content">
                     <ArrangementTimelineRuler
                       duration={timelineScrollDuration}
+                      maxLoopDuration={maxLoopDuration}
                       arrangementDuration={arrangementDuration}
                       pxPerSecond={pxPerSecond}
                       musicalTime={musicalTime}
@@ -721,6 +731,7 @@ export function ArrangementSection({
                       loopEdgeSnap={loopEdgeSnap}
                       contentBounds={contentBounds}
                       arrangementDuration={arrangementDuration}
+                      maxLoopDuration={maxLoopDuration}
                       pxPerSecond={pxPerSecond}
                       topPx={loopRegionTopPx}
                       heightPx={loopRegionHeightPx}
