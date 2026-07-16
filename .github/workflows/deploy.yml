@@ -24,4 +24,5 @@ jobs:
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          wranglerVersion: "4.108.0"
+          # Use the wrangler version from package-lock (npm ci above).
+          # Pinning a newer CLI here fails npm peer resolution against workers-types.
