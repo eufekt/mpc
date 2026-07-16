@@ -38,23 +38,21 @@ npm run download -- --batch offline/urls.txt
 
 Files are named `Title [videoId].mp4` (or `.wav` with `download:audio`). Load them in MPC via **LOAD TRACK** → file upload.
 
-## Deploy (Vercel)
-
-Set the Vercel project **root directory** to the repository root. [`vercel.json`](vercel.json) builds `apps/web` and outputs `apps/web/dist`.
-
-YouTube import requires a separate backend with `yt-dlp` and `ffmpeg`; the static Vercel deploy serves the UI and file upload only.
-
 ## Deploy (Cloudflare)
 
 Full-stack deploy: React UI (static assets) + Express API with `yt-dlp`/`ffmpeg` in a [Container](https://developers.cloudflare.com/containers/).
 
+Pushes to `main` deploy automatically via [`.github/workflows/deploy.yml`](.github/workflows/deploy.yml).
+
 **Requirements**
 
 - [Workers Paid](https://developers.cloudflare.com/workers/platform/pricing/) plan ($5/month minimum)
-- [Docker](https://docs.docker.com/get-docker/) running locally (Wrangler builds the container image on deploy)
-- [Wrangler CLI](https://developers.cloudflare.com/workers/wrangler/) authenticated (`wrangler login`)
+- GitHub Actions secrets (same values as other Cloudflare repos):
+  - `CLOUDFLARE_API_TOKEN`
+  - `CLOUDFLARE_ACCOUNT_ID`
+- For local/manual deploy: [Docker](https://docs.docker.com/get-docker/) running + [Wrangler](https://developers.cloudflare.com/workers/wrangler/) authenticated (`wrangler login`)
 
-**First deploy**
+**Manual deploy**
 
 ```bash
 npm install
@@ -63,16 +61,11 @@ npm run deploy:cloudflare
 
 This builds the frontend, builds/pushes the API container image, and deploys the Worker router. The first deploy can take several minutes; container provisioning may take a few more minutes before `/api` routes work.
 
-**Subsequent deploys**
-
-```bash
-npm run deploy:cloudflare
-```
-
 **Useful commands**
 
 ```bash
-npx wrangler dev          # local dev (needs Docker for container routes)
+npx wrangler deploy       # after npm run build
+npx wrangler dev          # local (needs Docker for container routes)
 npx wrangler containers list
 npx wrangler tail         # live Worker logs
 ```

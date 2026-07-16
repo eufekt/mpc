@@ -7,7 +7,7 @@ MPC is a browser-based audio sampler. Services and standard commands are documen
 ### Services
 - `@mpc/web` (Vite + React, http://localhost:5173) — the product. Almost all functionality (file upload, waveform chopping, pads, arrangement, MIDI, persistence) runs entirely client-side.
 - `@mpc/api` (Express, http://localhost:3001) — only used by the optional YouTube import feature. Vite proxies `/api` → `:3001` in dev.
-- `worker/` + `wrangler.jsonc` — Cloudflare deploy path only; not part of local dev.
+- `worker/` + `wrangler.jsonc` — Cloudflare deploy path only; not part of local dev. Pushes to `main` deploy via `.github/workflows/deploy.yml` (needs `CLOUDFLARE_API_TOKEN` + `CLOUDFLARE_ACCOUNT_ID` secrets).
 
 ### Running / building / checking
 - Dev (starts web + api together): `npm run dev` from the repo root.
