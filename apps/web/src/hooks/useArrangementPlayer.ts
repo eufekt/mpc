@@ -2,6 +2,8 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { stopSource } from "../lib/audioUtils";
 import {
   computeArrangementDuration,
+  computeArrangementContentBounds,
+  computeMaxLoopRegionDuration,
   filterLoadedTracks,
   getClipStartTime,
   getFreeClipAudibleSegments,
@@ -11,10 +13,12 @@ import {
   type ResolvedClip,
 } from "../lib/arrangement";
 import { playSlice } from "../lib/sliceAudioBuffer";
+import { getStretchedSlice } from "../lib/stretchRender";
 import { createChopEffectsInsert, normalizeMasterEffects } from "../lib/masterEffects";
 import { secondsPerBeat } from "../lib/musicalTime";
 import type {
   ArrangementLane,
+  ArrangementLoopMode,
   ArrangementLoopRegion,
   MusicalTimeSettings,
   Track,
@@ -58,6 +62,8 @@ type Params = {
   tracks: Track[];
   loadedTrackIds: string[];
   loopRegion: ArrangementLoopRegion | null | undefined;
+  loopMode: ArrangementLoopMode;
+  loopBeats: number;
   musicalTime: MusicalTimeSettings;
   getBuffer: (trackId: string) => AudioBuffer | undefined;
   getContext: () => AudioContext;
@@ -108,14 +114,41 @@ function scheduleClipWallSegment(
 
   const offsetInClip = wallStart - clipStart;
   const offsetEnd = wallEnd - clipStart;
+
+  // Tempo-mode chops play a pre-rendered pitch-preserved buffer at rate 1;
+  // wall-clock offsets map 1:1 to positions in the stretched buffer.
+  const stretched =
+    item.chop.stretchMode === "tempo" && item.timeStretch !== 1
+      ? getStretchedSlice(item.track.id, item.chop)
+      : null;
+
+  let playBuffer: AudioBuffer;
   let bufferStart: number;
   let bufferEnd: number;
-  if (item.chop.reverse) {
-    bufferStart = item.chop.end - offsetEnd * item.timeStretch;
-    bufferEnd = item.chop.end - offsetInClip * item.timeStretch;
+  let playbackRate: number;
+
+  if (stretched) {
+    playBuffer = stretched;
+    playbackRate = 1;
+    if (item.chop.reverse) {
+      bufferStart = item.playbackDuration - offsetEnd;
+      bufferEnd = item.playbackDuration - offsetInClip;
+    } else {
+      bufferStart = offsetInClip;
+      bufferEnd = offsetEnd;
+    }
+    bufferStart = Math.max(0, Math.min(stretched.duration, bufferStart));
+    bufferEnd = Math.max(0, Math.min(stretched.duration, bufferEnd));
   } else {
-    bufferStart = item.chop.start + offsetInClip * item.timeStretch;
-    bufferEnd = item.chop.start + offsetEnd * item.timeStretch;
+    playBuffer = buffer;
+    playbackRate = item.timeStretch;
+    if (item.chop.reverse) {
+      bufferStart = item.chop.end - offsetEnd * item.timeStretch;
+      bufferEnd = item.chop.end - offsetInClip * item.timeStretch;
+    } else {
+      bufferStart = item.chop.start + offsetInClip * item.timeStretch;
+      bufferEnd = item.chop.start + offsetEnd * item.timeStretch;
+    }
   }
 
   if (bufferEnd <= bufferStart) return null;
@@ -128,13 +161,13 @@ function scheduleClipWallSegment(
 
   return playSlice(
     ctx,
-    buffer,
+    playBuffer,
     bufferStart,
     bufferEnd,
     chopFx.input,
     volume,
     when,
-    item.timeStretch,
+    playbackRate,
     item.chop.reverse,
   );
 }
@@ -277,6 +310,8 @@ export function useArrangementPlayer({
   tracks,
   loadedTrackIds,
   loopRegion,
+  loopMode,
+  loopBeats,
   musicalTime,
   getBuffer,
   getContext,
@@ -514,7 +549,10 @@ export function useArrangementPlayer({
       const pausedAt = loopRef.current
         ? loopPlayheadTime(elapsed, bounds, loopInitialStartRef.current)
         : loopInitialStartRef.current + elapsed;
-      setSeekTimeState(Math.min(pausedAt, duration));
+      const playbackExtent = loopRef.current
+        ? Math.max(duration, bounds.end)
+        : duration;
+      setSeekTimeState(Math.min(pausedAt, playbackExtent));
     }
 
     baseTimeRef.current = null;
@@ -566,14 +604,25 @@ export function useArrangementPlayer({
       const duration = computeArrangementDuration(lanes, playable);
       if (duration <= 0) return;
 
-      const bounds = resolveLoopBounds(loopRegion, duration);
+      const maxLoopDuration = computeMaxLoopRegionDuration(duration);
+      const bounds = resolveLoopBounds(loopRegion, maxLoopDuration, {
+        loopMode,
+        loopBeats,
+        bpm: musicalTime.bpm,
+        contentBounds: computeArrangementContentBounds(lanes, playable),
+        contentExtent: duration,
+      });
       loopBoundsRef.current = bounds;
+
+      const playbackExtent = loopRef.current
+        ? Math.max(duration, bounds.end)
+        : duration;
 
       let startAt = Math.max(
         0,
-        Math.min(fromTime ?? seekTime, duration),
+        Math.min(fromTime ?? seekTime, playbackExtent),
       );
-      if (startAt >= duration) {
+      if (startAt >= playbackExtent) {
         startAt = 0;
       }
       if (loopRef.current && startAt >= bounds.end) {
@@ -582,7 +631,7 @@ export function useArrangementPlayer({
 
       const baseTime = ctx.currentTime + LOOKAHEAD_SECONDS;
       baseTimeRef.current = baseTime;
-      durationRef.current = duration;
+      durationRef.current = playbackExtent;
       loopInitialStartRef.current = startAt;
       setSeekTimeState(startAt);
 
@@ -639,6 +688,8 @@ export function useArrangementPlayer({
       playableTracks,
       tracks,
       loopRegion,
+      loopMode,
+      loopBeats,
       musicalTime,
     ],
   );
@@ -646,13 +697,27 @@ export function useArrangementPlayer({
   const setSeekTime = useCallback(
     (time: number) => {
       const duration = computeArrangementDuration(lanes, playableTracks());
-      const next = Math.max(0, Math.min(time, duration));
+      const maxLoopDuration = computeMaxLoopRegionDuration(duration);
+      const bounds = resolveLoopBounds(loopRegion, maxLoopDuration, {
+        loopMode,
+        loopBeats,
+        bpm: musicalTime.bpm,
+        contentBounds: computeArrangementContentBounds(
+          lanes,
+          playableTracks(),
+        ),
+        contentExtent: duration,
+      });
+      const playbackExtent = loop
+        ? Math.max(duration, bounds.end)
+        : duration;
+      const next = Math.max(0, Math.min(time, playbackExtent));
       setSeekTimeState(next);
       if (isPlaying) {
         void play(next);
       }
     },
-    [isPlaying, lanes, play, playableTracks],
+    [isPlaying, lanes, loop, loopBeats, loopMode, loopRegion, musicalTime.bpm, play, playableTracks],
   );
 
   const getPlayheadTime = useCallback(() => {

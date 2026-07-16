@@ -51,6 +51,7 @@ export function toChopPlayRequests(bound: BoundChop[]): ChopPlayRequest[] {
     key: b.chop.key!,
     volume: b.chop.volume,
     timeStretch: b.chop.timeStretch,
+    stretchMode: b.chop.stretchMode,
     reverse: b.chop.reverse,
     effects: b.chop.effects ?? DEFAULT_MASTER_EFFECTS,
   }));

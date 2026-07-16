@@ -24,6 +24,118 @@ const REGION_TIME_START = "region-time-start";
 const REGION_TIME_END = "region-time-end";
 type PlaybackDirection = "forward" | "reverse";
 
+export type WaveformSnapDivision = 4 | 8 | 16;
+
+/** Source material is treated as 4/4 for waveform bar lines. */
+const WAVEFORM_BEATS_PER_BAR = 4;
+
+type BeatGridConfig = {
+  sourceBpm: number | undefined;
+  beatOffset: number;
+  snapEnabled: boolean;
+  snapDivision: WaveformSnapDivision;
+};
+
+function waveformSnapStep(config: BeatGridConfig): number {
+  if (!config.sourceBpm || config.sourceBpm <= 0) return 0;
+  return (60 / config.sourceBpm) * (4 / config.snapDivision);
+}
+
+/** Snap a waveform time to the source-tempo grid (anchored at beatOffset). */
+function snapWaveformTime(
+  time: number,
+  config: BeatGridConfig,
+  duration: number,
+): number {
+  const step = waveformSnapStep(config);
+  if (!config.snapEnabled || step <= 0) return time;
+  const snapped =
+    config.beatOffset + Math.round((time - config.beatOffset) / step) * step;
+  return Math.max(0, Math.min(duration, snapped));
+}
+
+/** Snapped region bounds, kept at least one grid step long. */
+function snapRegionBounds(
+  start: number,
+  end: number,
+  config: BeatGridConfig,
+  duration: number,
+): { start: number; end: number } | null {
+  const step = waveformSnapStep(config);
+  if (!config.snapEnabled || step <= 0) return null;
+  let snappedStart = snapWaveformTime(start, config, duration);
+  let snappedEnd = snapWaveformTime(end, config, duration);
+  if (snappedEnd - snappedStart < step / 2) {
+    snappedEnd = Math.min(duration, snappedStart + step);
+    if (snappedEnd - snappedStart < step / 2) {
+      snappedStart = Math.max(0, snappedEnd - step);
+    }
+  }
+  return { start: snappedStart, end: snappedEnd };
+}
+
+function createBeatGridLayer(): HTMLDivElement {
+  const layer = document.createElement("div");
+  layer.className = "waveform-beat-grid";
+  Object.assign(layer.style, {
+    position: "absolute",
+    top: "0",
+    left: "0",
+    height: "100%",
+    pointerEvents: "none",
+    zIndex: "2",
+  });
+  return layer;
+}
+
+function updateBeatGridLayer(
+  ws: WaveSurfer,
+  layer: HTMLElement,
+  config: BeatGridConfig,
+): void {
+  const duration = ws.getDuration();
+  if (!config.sourceBpm || config.sourceBpm <= 0 || duration <= 0) {
+    layer.style.display = "none";
+    return;
+  }
+
+  const wrapper = ws.getWrapper();
+  const width = wrapper.scrollWidth || wrapper.clientWidth;
+  if (width <= 0) {
+    layer.style.display = "none";
+    return;
+  }
+
+  const pxPerSecond = width / duration;
+  const beatPx = (60 / config.sourceBpm) * pxPerSecond;
+  const barPx = beatPx * WAVEFORM_BEATS_PER_BAR;
+  const divisionPx = beatPx * (4 / config.snapDivision);
+  // Each repeating layer wraps at its own period, so the full offset works for all.
+  const offsetPx = config.beatOffset * pxPerSecond;
+
+  // Hide the grid when lines get too dense to read.
+  if (beatPx < 4) {
+    layer.style.display = "none";
+    return;
+  }
+
+  const layers = [
+    `repeating-linear-gradient(to right, var(--border) 0, var(--border) 1px, transparent 1px, transparent ${barPx}px)`,
+    `repeating-linear-gradient(to right, var(--border-faint) 0, var(--border-faint) 1px, transparent 1px, transparent ${beatPx}px)`,
+  ];
+  if (config.snapEnabled && divisionPx >= 4 && divisionPx < beatPx) {
+    layers.push(
+      `repeating-linear-gradient(to right, var(--border-faint) 0, var(--border-faint) 1px, transparent 1px, transparent ${divisionPx}px)`,
+    );
+  }
+
+  layer.style.display = "";
+  layer.style.width = `${width}px`;
+  layer.style.opacity = "0.6";
+  layer.style.backgroundImage = layers.join(", ");
+  layer.style.backgroundPositionX = `${offsetPx}px`;
+}
+
 function regionTimeLabelStyle(): Partial<CSSStyleDeclaration> {
   const { fg, bg } = getThemeColors();
   return {
@@ -146,6 +258,12 @@ type Props = {
   onSeek: (time: number) => void;
   getPlaybackTime: () => number | null;
   getPlaybackDirection: () => PlaybackDirection | null;
+  /** Source tempo — enables the beat grid overlay and snapping. */
+  sourceBpm?: number;
+  /** Seconds from buffer start to the first beat. */
+  beatOffset?: number;
+  snapEnabled?: boolean;
+  snapDivision?: WaveformSnapDivision;
 };
 
 function positionPlaybackLine(
@@ -251,11 +369,16 @@ export function WaveformEditor({
   onSeek,
   getPlaybackTime,
   getPlaybackDirection,
+  sourceBpm,
+  beatOffset = 0,
+  snapEnabled = false,
+  snapDivision = 16,
 }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const wavesurferRef = useRef<WaveSurfer | null>(null);
   const regionsRef = useRef<RegionsPlugin | null>(null);
   const playbackLineRef = useRef<HTMLDivElement | null>(null);
+  const beatGridLayerRef = useRef<HTMLDivElement | null>(null);
   const getPlaybackTimeRef = useRef(getPlaybackTime);
   const getPlaybackDirectionRef = useRef(getPlaybackDirection);
   const seekTimeRef = useRef(seekTime);
@@ -263,6 +386,12 @@ export function WaveformEditor({
   const onChopsChangeRef = useRef(onChopsChange);
   const chopsRef = useRef(chops);
   const paletteModeRef = useRef(paletteMode);
+  const beatGridRef = useRef<BeatGridConfig>({
+    sourceBpm,
+    beatOffset,
+    snapEnabled,
+    snapDivision,
+  });
   // Prevents region-created handler from echoing back into React state during sync.
   const syncingRef = useRef(false);
   getPlaybackTimeRef.current = getPlaybackTime;
@@ -272,6 +401,7 @@ export function WaveformEditor({
   onChopsChangeRef.current = onChopsChange;
   chopsRef.current = chops;
   paletteModeRef.current = paletteMode;
+  beatGridRef.current = { sourceBpm, beatOffset, snapEnabled, snapDivision };
 
   useEffect(() => {
     const container = containerRef.current;
@@ -325,6 +455,9 @@ export function WaveformEditor({
     const playbackLine = createPlaybackCursor();
     playbackLineRef.current = playbackLine;
 
+    const beatGridLayer = createBeatGridLayer();
+    beatGridLayerRef.current = beatGridLayer;
+
     const onInteraction = (time: number) => {
       onSeekRef.current(time);
       const duration = ws.getDuration();
@@ -354,10 +487,36 @@ export function WaveformEditor({
       ),
     });
 
+    // Snap region edges to the source-tempo grid; write back so visuals match.
+    const applyRegionSnap = (region: Region): { start: number; end: number } => {
+      const snapped = snapRegionBounds(
+        region.start,
+        region.end,
+        beatGridRef.current,
+        ws.getDuration(),
+      );
+      if (!snapped) return { start: region.start, end: region.end };
+      if (
+        Math.abs(snapped.start - region.start) > 1e-6 ||
+        Math.abs(snapped.end - region.end) > 1e-6
+      ) {
+        const wasSyncing = syncingRef.current;
+        syncingRef.current = true;
+        try {
+          region.setOptions({ start: snapped.start, end: snapped.end });
+        } finally {
+          syncingRef.current = wasSyncing;
+        }
+        updateRegionTimeLabels(region);
+      }
+      return snapped;
+    };
+
     const onRegionCreated = (region: Region) => {
       updateRegionTimeLabels(region);
       applyChopStackLayout(chopsRef.current, regions.getRegions());
       if (syncingRef.current) return;
+      const { start, end } = applyRegionSnap(region);
       const color = getColorForIndex(
         paletteModeRef.current,
         chopsRef.current.length,
@@ -367,8 +526,8 @@ export function WaveformEditor({
         ...chopsRef.current,
         {
           id: region.id,
-          start: region.start,
-          end: region.end,
+          start,
+          end,
           key: null,
           color,
           volume: 1,
@@ -388,11 +547,10 @@ export function WaveformEditor({
       updateRegionTimeLabels(region);
       applyChopStackLayout(chopsRef.current, regions.getRegions());
       if (syncingRef.current) return;
+      const { start, end } = applyRegionSnap(region);
       onChopsChangeRef.current(
         chopsRef.current.map((c) =>
-          c.id === region.id
-            ? { ...c, start: region.start, end: region.end }
-            : c,
+          c.id === region.id ? { ...c, start, end } : c,
         ),
       );
     };
@@ -413,7 +571,9 @@ export function WaveformEditor({
       );
       syncZoomPluginBounds(zoom, maxZoom);
 
+      ws.getWrapper().appendChild(beatGridLayer);
       ws.getWrapper().appendChild(playbackLine);
+      updateBeatGridLayer(ws, beatGridLayer, beatGridRef.current);
       cancelAnimationFrame(raf);
       raf = requestAnimationFrame(playbackLoop);
     };
@@ -424,6 +584,7 @@ export function WaveformEditor({
     }
 
     const onLayoutChange = () => {
+      updateBeatGridLayer(ws, beatGridLayer, beatGridRef.current);
       const time = getPlaybackTimeRef.current() ?? seekTimeRef.current;
       if (time !== null && ws.getDuration() > 0) {
         const direction = getPlaybackDirectionRef.current() ?? "forward";
@@ -447,6 +608,8 @@ export function WaveformEditor({
       regions.un("region-updated", onRegionUpdated);
       playbackLine.remove();
       playbackLineRef.current = null;
+      beatGridLayer.remove();
+      beatGridLayerRef.current = null;
       URL.revokeObjectURL(url);
       ws.destroy();
       wavesurferRef.current = null;
@@ -461,6 +624,21 @@ export function WaveformEditor({
       color: regionFillColor(getColorForIndex(paletteMode, chops.length)),
     });
   }, [paletteMode, chops.length]);
+
+  useEffect(() => {
+    const ws = wavesurferRef.current;
+    const layer = beatGridLayerRef.current;
+    if (!ws || !layer) return;
+    const config: BeatGridConfig = {
+      sourceBpm,
+      beatOffset,
+      snapEnabled,
+      snapDivision,
+    };
+    if (ws.getDuration() > 0) {
+      updateBeatGridLayer(ws, layer, config);
+    }
+  }, [sourceBpm, beatOffset, snapEnabled, snapDivision]);
 
   useEffect(() => {
     const ws = wavesurferRef.current;

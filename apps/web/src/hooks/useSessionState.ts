@@ -10,14 +10,17 @@ import {
   DEFAULT_LANE_ROW_HEIGHT,
   clampLaneRowHeight,
 } from "../lib/arrangement";
+import { normalizeBeatOffset, normalizeSourceBpm } from "../lib/beatFit";
 import { getChopNaturalDuration, getChopPlaybackDuration, normalizeTimeStretch } from "../lib/chopPlayback";
 import { assignColorsToChops, type PaletteMode } from "../lib/chopColors";
 import type {
   ArrangementLane,
   ArrangementClipStackMode,
   ArrangementLaneMode,
+  ArrangementLoopMode,
   ArrangementLoopRegion,
   Chop,
+  LoopEdgeSnap,
   MusicalTimeSettings,
   PadMode,
   SessionState,
@@ -26,7 +29,7 @@ import type {
 import { createTrackId } from "../lib/trackIds";
 import { DEFAULT_ACCENT_COLOR } from "../lib/transport";
 import { DEFAULT_MASTER_EFFECTS, normalizeMasterEffects, type MasterEffects } from "../lib/masterEffects";
-import { defaultMusicalTime, normalizeMusicalTime, snapTime } from "../lib/musicalTime";
+import { defaultMusicalTime, normalizeLoopBeats, normalizeLoopEdgeSnap, normalizeLoopMode, normalizeMusicalTime, snapTime } from "../lib/musicalTime";
 
 export function createTrack(
   params: Pick<Track, "sourceType" | "sourceName" | "name"> & {
@@ -66,6 +69,9 @@ function createInitialState(): SessionState {
     arrangement: {
       lanes: [],
       laneRowHeight: DEFAULT_LANE_ROW_HEIGHT,
+      loopMode: normalizeLoopMode(undefined),
+      loopBeats: normalizeLoopBeats(undefined),
+      loopEdgeSnap: normalizeLoopEdgeSnap(undefined),
       musicalTime: defaultMusicalTime(),
     },
     activeTrackId: null,
@@ -87,6 +93,11 @@ type SessionAction =
   | { type: "addTrack"; track: Track }
   | { type: "removeTrack"; trackId: string }
   | { type: "renameTrack"; trackId: string; name: string }
+  | {
+      type: "updateTrack";
+      trackId: string;
+      patch: Partial<Pick<Track, "sourceBpm" | "beatOffset">>;
+    }
   | { type: "setActiveTrack"; trackId: string | null }
   | { type: "updateChops"; trackId: string; chops: Chop[] }
   | { type: "deleteChop"; trackId: string; chopId: string }
@@ -130,6 +141,9 @@ type SessionAction =
   | { type: "setLaneVolume"; laneId: string; volume: number }
   | { type: "setLaneRowHeight"; laneRowHeight: number }
   | { type: "setLoopRegion"; loopRegion: ArrangementLoopRegion | undefined }
+  | { type: "setLoopMode"; loopMode: ArrangementLoopMode }
+  | { type: "setLoopBeats"; loopBeats: number }
+  | { type: "setLoopEdgeSnap"; loopEdgeSnap: LoopEdgeSnap }
   | { type: "setMusicalTime"; patch: Partial<MusicalTimeSettings> };
 
 function laneBlockerSegments(
@@ -218,6 +232,13 @@ function sessionReducer(
           t.id === action.trackId ? { ...t, name: action.name } : t,
         ),
       };
+    case "updateTrack":
+      return {
+        ...state,
+        tracks: state.tracks.map((t) =>
+          t.id === action.trackId ? { ...t, ...action.patch } : t,
+        ),
+      };
     case "setActiveTrack":
       return { ...state, activeTrackId: action.trackId };
     case "updateChops":
@@ -275,6 +296,7 @@ function sessionReducer(
         color: source.color,
         volume: source.volume,
         timeStretch: source.timeStretch,
+        stretchMode: source.stretchMode,
         reverse: source.reverse,
         effects: normalizeMasterEffects(source.effects),
       };
@@ -510,6 +532,32 @@ function sessionReducer(
         arrangement: {
           ...state.arrangement,
           loopRegion: action.loopRegion,
+          ...(action.loopRegion ? { loopMode: "region" as const } : {}),
+        },
+      };
+    case "setLoopMode":
+      return {
+        ...state,
+        arrangement: {
+          ...state.arrangement,
+          loopMode: normalizeLoopMode(action.loopMode),
+        },
+      };
+    case "setLoopBeats":
+      return {
+        ...state,
+        arrangement: {
+          ...state.arrangement,
+          loopBeats: normalizeLoopBeats(action.loopBeats),
+          loopMode: "beats",
+        },
+      };
+    case "setLoopEdgeSnap":
+      return {
+        ...state,
+        arrangement: {
+          ...state.arrangement,
+          loopEdgeSnap: normalizeLoopEdgeSnap(action.loopEdgeSnap),
         },
       };
     case "setMusicalTime":
@@ -551,6 +599,23 @@ export function useSessionState() {
   const renameTrack = useCallback((trackId: string, name: string) => {
     dispatch({ type: "renameTrack", trackId, name });
   }, []);
+
+  const updateTrack = useCallback(
+    (
+      trackId: string,
+      patch: Partial<Pick<Track, "sourceBpm" | "beatOffset">>,
+    ) => {
+      const normalized = { ...patch };
+      if ("sourceBpm" in normalized) {
+        normalized.sourceBpm = normalizeSourceBpm(normalized.sourceBpm);
+      }
+      if ("beatOffset" in normalized) {
+        normalized.beatOffset = normalizeBeatOffset(normalized.beatOffset);
+      }
+      dispatch({ type: "updateTrack", trackId, patch: normalized });
+    },
+    [],
+  );
 
   const setActiveTrack = useCallback((trackId: string | null) => {
     dispatch({ type: "setActiveTrack", trackId });
@@ -725,6 +790,18 @@ export function useSessionState() {
     dispatch({ type: "setLoopRegion", loopRegion });
   }, []);
 
+  const setLoopBeats = useCallback((loopBeats: number) => {
+    dispatch({ type: "setLoopBeats", loopBeats });
+  }, []);
+
+  const setLoopMode = useCallback((loopMode: ArrangementLoopMode) => {
+    dispatch({ type: "setLoopMode", loopMode });
+  }, []);
+
+  const setLoopEdgeSnap = useCallback((loopEdgeSnap: LoopEdgeSnap) => {
+    dispatch({ type: "setLoopEdgeSnap", loopEdgeSnap });
+  }, []);
+
   const setMusicalTime = useCallback((patch: Partial<MusicalTimeSettings>) => {
     dispatch({ type: "setMusicalTime", patch });
   }, []);
@@ -740,6 +817,7 @@ export function useSessionState() {
     addTrack,
     removeTrack,
     renameTrack,
+    updateTrack,
     setActiveTrack,
     updateChops,
     deleteChop,
@@ -765,6 +843,9 @@ export function useSessionState() {
     setLaneVolume,
     setLaneRowHeight,
     setLoopRegion,
+    setLoopMode,
+    setLoopBeats,
+    setLoopEdgeSnap,
     setMusicalTime,
   };
 }

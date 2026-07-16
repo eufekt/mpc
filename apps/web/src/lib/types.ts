@@ -1,6 +1,9 @@
 import type { PaletteMode } from "./chopColors";
 import type { MasterEffects } from "./masterEffects";
 
+/** repitch = classic playbackRate (pitch follows speed); tempo = pitch-preserved stretch. */
+export type ChopStretchMode = "repitch" | "tempo";
+
 export type Chop = {
   id: string;
   start: number;
@@ -12,6 +15,8 @@ export type Chop = {
   volume: number;
   /** Playback speed multiplier — 1.000 = normal, 0.900 = 0.9× speed. */
   timeStretch: number;
+  /** How timeStretch is applied — absent means repitch. */
+  stretchMode?: ChopStretchMode;
   /** When true, chop plays from end to start. */
   reverse: boolean;
   /** Per-chop insert — applied before the session master effects bus. */
@@ -29,6 +34,10 @@ export type Track = {
   sourceName: string;
   sourceUrl?: string;
   chops: Chop[];
+  /** Detected or user-entered tempo of the source audio. */
+  sourceBpm?: number;
+  /** Seconds from buffer start to the first beat. */
+  beatOffset?: number;
 };
 
 export type ArrangementLaneMode = "clamped" | "free";
@@ -60,6 +69,12 @@ export type ArrangementLoopRegion = {
   end: number;
 };
 
+/** How arrangement loop bounds are chosen when LOOP is enabled. */
+export type ArrangementLoopMode = "region" | "content" | "beats";
+
+/** Snap loop region handles to the grid — off keeps sample-accurate phrase lengths. */
+export type LoopEdgeSnap = "off" | "beat" | "bar";
+
 export type SnapDivision = 4 | 8 | 16 | 32 | 64 | 128;
 
 export type MusicalTimeSettings = {
@@ -77,8 +92,14 @@ export type ArrangementState = {
   lanes: ArrangementLane[];
   /** Pixel height of each timeline lane row (saved workspace preference). */
   laneRowHeight: number;
-  /** Loop bounds when arrangement loop is enabled — omit for full-length loop. */
+  /** Loop bounds in region mode — omit to fall back to content length. */
   loopRegion?: ArrangementLoopRegion;
+  /** Region = custom loop points; content = all placed clips; beats = grid length from start. */
+  loopMode?: ArrangementLoopMode;
+  /** Grid loop length when loopMode is beats — default 16 (4 bars in 4/4). */
+  loopBeats?: number;
+  /** Snap loop region handles — default off for phrase-accurate loops. */
+  loopEdgeSnap?: LoopEdgeSnap;
   musicalTime?: MusicalTimeSettings;
 };
 
@@ -123,6 +144,8 @@ export type ChopPlayRequest = {
   key: string;
   volume: number;
   timeStretch: number;
+  /** How timeStretch is applied — absent means repitch. */
+  stretchMode?: ChopStretchMode;
   reverse: boolean;
   /** Semitone offset from the chop's natural pitch (keyboard mode). */
   pitchSemitones?: number;

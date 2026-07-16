@@ -12,7 +12,9 @@
   "dependencies": {
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
-    "wavesurfer.js": "^7.9.4"
+    "soundtouchjs": "^0.3.0",
+    "wavesurfer.js": "^7.9.4",
+    "web-audio-beat-detector": "^8.2.37"
   },
   "devDependencies": {
     "@types/react": "^19.1.2",

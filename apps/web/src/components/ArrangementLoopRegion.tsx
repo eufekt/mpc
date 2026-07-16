@@ -6,17 +6,28 @@ import {
   resolveLoopBounds,
   seekTimeFromClientX,
   timeToPx,
+  type ArrangementLoopBounds,
 } from "../lib/arrangement";
+import {
+  formatLoopBeatLength,
+  snapLoopEdgeTime,
+} from "../lib/musicalTime";
 import { formatTimePrecise } from "../lib/timeFormat";
-import { snapTime } from "../lib/musicalTime";
 import type {
+  ArrangementLoopMode,
   ArrangementLoopRegion as LoopRegion,
+  LoopEdgeSnap,
   MusicalTimeSettings,
 } from "../lib/types";
 
 type Props = {
   loopRegion: LoopRegion | null | undefined;
+  loopMode: ArrangementLoopMode;
+  loopBeats: number;
+  loopEdgeSnap: LoopEdgeSnap;
+  contentBounds: ArrangementLoopBounds | null;
   arrangementDuration: number;
+  maxLoopDuration: number;
   pxPerSecond: number;
   topPx: number;
   heightPx: number;
@@ -27,7 +38,12 @@ type Props = {
 
 export function ArrangementLoopRegion({
   loopRegion,
+  loopMode,
+  loopBeats,
+  loopEdgeSnap,
+  contentBounds,
   arrangementDuration,
+  maxLoopDuration,
   pxPerSecond,
   topPx,
   heightPx,
@@ -35,7 +51,13 @@ export function ArrangementLoopRegion({
   musicalTime,
   onChange,
 }: Props) {
-  const resolvedRegion = resolveLoopBounds(loopRegion, arrangementDuration);
+  const resolvedRegion = resolveLoopBounds(loopRegion, maxLoopDuration, {
+    loopMode,
+    loopBeats,
+    bpm: musicalTime?.bpm,
+    contentBounds,
+    contentExtent: arrangementDuration,
+  });
   const dragRef = useRef<{
     edge: "start" | "end";
     initialRegion: LoopRegion;
@@ -48,18 +70,29 @@ export function ArrangementLoopRegion({
     timeToPx(displayRegion.end - displayRegion.start, pxPerSecond),
   );
   const toTime = (px: number) => pxToTime(px, pxPerSecond);
+  const loopLengthSeconds = displayRegion.end - displayRegion.start;
+  const showHandles = loopMode === "region";
 
   const commitRegion = useCallback(
     (start: number, end: number) => {
       onChange(
-        normalizeLoopRegion({ start, end }, arrangementDuration),
+        normalizeLoopRegion({ start, end }, maxLoopDuration, arrangementDuration),
       );
     },
-    [arrangementDuration, onChange],
+    [arrangementDuration, maxLoopDuration, onChange],
+  );
+
+  const snapLoopTime = useCallback(
+    (rawTime: number) => {
+      if (!musicalTime) return Math.max(0, rawTime);
+      return snapLoopEdgeTime(rawTime, loopEdgeSnap, musicalTime);
+    },
+    [loopEdgeSnap, musicalTime],
   );
 
   const handleResizePointerDown = useCallback(
     (edge: "start" | "end", event: React.PointerEvent<HTMLDivElement>) => {
+      if (!showHandles) return;
       event.preventDefault();
       event.stopPropagation();
       const regionEl = event.currentTarget.parentElement;
@@ -73,7 +106,7 @@ export function ArrangementLoopRegion({
         const drag = dragRef.current;
         if (!drag) return;
         const rawTime = seekTimeFromClientX(ev.clientX, regionEl, toTime);
-        const time = musicalTime ? snapTime(rawTime, musicalTime) : rawTime;
+        const time = snapLoopTime(rawTime);
         if (drag.edge === "start") {
           commitRegion(
             Math.min(time, drag.initialRegion.end - MIN_LOOP_REGION_SECONDS),
@@ -97,16 +130,22 @@ export function ArrangementLoopRegion({
       window.addEventListener("pointermove", onMove);
       window.addEventListener("pointerup", onUp);
     },
-    [commitRegion, musicalTime, pxPerSecond, resolvedRegion],
+    [commitRegion, resolvedRegion, showHandles, snapLoopTime, toTime],
   );
 
   if (arrangementDuration <= 0) return null;
+
+  const lengthLabel =
+    musicalTime && loopLengthSeconds > 0
+      ? `${formatLoopBeatLength(loopLengthSeconds, musicalTime.bpm)} · ${formatTimePrecise(loopLengthSeconds)}`
+      : formatTimePrecise(loopLengthSeconds);
 
   return (
     <div
       className={[
         "arrangement-loop-region",
         loopEnabled ? "active" : "",
+        showHandles ? "editable" : "",
       ]
         .filter(Boolean)
         .join(" ")}
@@ -121,21 +160,25 @@ export function ArrangementLoopRegion({
         <span className="region-time-label region-time-start">
           {formatTimePrecise(displayRegion.start)}
         </span>
-        <span className="region-time-gap" aria-hidden />
+        <span className="region-length-label">{lengthLabel}</span>
         <span className="region-time-label region-time-end">
           {formatTimePrecise(displayRegion.end)}
         </span>
       </div>
-      <div
-        className="arrangement-loop-handle arrangement-loop-handle-start"
-        onPointerDown={(e) => handleResizePointerDown("start", e)}
-        aria-label="Loop region start"
-      />
-      <div
-        className="arrangement-loop-handle arrangement-loop-handle-end"
-        onPointerDown={(e) => handleResizePointerDown("end", e)}
-        aria-label="Loop region end"
-      />
+      {showHandles && (
+        <>
+          <div
+            className="arrangement-loop-handle arrangement-loop-handle-start"
+            onPointerDown={(e) => handleResizePointerDown("start", e)}
+            aria-label="Loop region start"
+          />
+          <div
+            className="arrangement-loop-handle arrangement-loop-handle-end"
+            onPointerDown={(e) => handleResizePointerDown("end", e)}
+            aria-label="Loop region end"
+          />
+        </>
+      )}
     </div>
   );
 }
