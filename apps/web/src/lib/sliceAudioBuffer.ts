@@ -1,5 +1,5 @@
 function connectWithGain(
-  context: AudioContext,
+  context: BaseAudioContext,
   source: AudioBufferSourceNode,
   destination: AudioNode,
   volume: number,
@@ -15,7 +15,7 @@ function connectWithGain(
 }
 
 function createReversedSliceBuffer(
-  context: AudioContext,
+  context: BaseAudioContext,
   buffer: AudioBuffer,
   start: number,
   end: number,
@@ -49,7 +49,7 @@ function createReversedSliceBuffer(
 }
 
 export function playSlice(
-  context: AudioContext,
+  context: BaseAudioContext,
   buffer: AudioBuffer,
   start: number,
   end: number,
@@ -79,7 +79,7 @@ export function playSlice(
 }
 
 export function playFrom(
-  context: AudioContext,
+  context: BaseAudioContext,
   buffer: AudioBuffer,
   from: number,
   destination: AudioNode,
@@ -93,7 +93,7 @@ export function playFrom(
 }
 
 export function playSliceLoop(
-  context: AudioContext,
+  context: BaseAudioContext,
   buffer: AudioBuffer,
   start: number,
   end: number,

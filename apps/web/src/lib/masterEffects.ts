@@ -144,7 +144,7 @@ function clamp(value: number, min: number, max: number): number {
 }
 
 function createReverbImpulseResponse(
-  context: AudioContext,
+  context: BaseAudioContext,
   decaySeconds: number,
 ): AudioBuffer {
   const sampleRate = context.sampleRate;
@@ -186,7 +186,7 @@ export function patchMasterEffects(
 
 /** Per-chop insert routed into the master bus (chop FX → master FX). */
 export function createChopEffectsInsert(
-  context: AudioContext,
+  context: BaseAudioContext,
   masterBus: AudioNode,
   effects: MasterEffects,
 ): MasterEffectsRack {
@@ -197,7 +197,7 @@ export function createChopEffectsInsert(
 }
 
 /** Master insert: filter -> dry/wet delay -> reverb -> output. */
-export function createMasterEffectsRack(context: AudioContext): MasterEffectsRack {
+export function createMasterEffectsRack(context: BaseAudioContext): MasterEffectsRack {
   const input = context.createGain();
   const output = context.createGain();
   const filter = context.createBiquadFilter();

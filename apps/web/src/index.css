@@ -2134,9 +2134,18 @@ pre {
   font-size: 10px;
 }
 
+.chop-inspector-export,
 .chop-inspector-duplicate,
 .chop-inspector-delete {
   margin-top: 4px;
+}
+
+.chop-inspector-export:disabled {
+  opacity: 0.5;
+}
+
+.chop-inspector-export-error {
+  font-weight: bold;
 }
 
 .chop-inspector-effects {
