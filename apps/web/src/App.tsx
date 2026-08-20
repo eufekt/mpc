@@ -49,6 +49,7 @@ import {
   DEFAULT_MASTER_EFFECTS,
   type MasterEffects,
 } from "./lib/masterEffects";
+import { exportChopWithEffects } from "./lib/exportChop";
 import type { ChopStretchMode } from "./lib/types";
 import {
   getAssignedKeys,
@@ -1424,6 +1425,23 @@ export default function App() {
                 }
                 onDuplicate={() =>
                   handleDuplicateChop(inspectorChop.track.id, inspectorChop.chop.id)
+                }
+                onExport={async () => {
+                  const buffer = engine.getBuffer(inspectorChop.track.id);
+                  if (!buffer) {
+                    throw new Error("track audio is not loaded");
+                  }
+                  await exportChopWithEffects({
+                    renderContext: engine.getContext(),
+                    buffer,
+                    trackId: inspectorChop.track.id,
+                    trackName: inspectorChop.track.name,
+                    chop: inspectorChop.chop,
+                    chopIndex: inspectorChop.chopIndex,
+                  });
+                }}
+                exportDisabled={
+                  !engine.loadedTrackIds.includes(inspectorChop.track.id)
                 }
                 onClose={() => setSelectedChop(null)}
               />

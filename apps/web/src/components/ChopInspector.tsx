@@ -35,6 +35,8 @@ type Props = {
   onColorChange: (color: string) => void;
   onDelete: () => void;
   onDuplicate: () => void;
+  onExport: () => Promise<void>;
+  exportDisabled?: boolean;
   onClose: () => void;
 };
 
@@ -56,9 +58,13 @@ export function ChopInspector({
   onColorChange,
   onDelete,
   onDuplicate,
+  onExport,
+  exportDisabled = false,
   onClose,
 }: Props) {
   const [colorMenuOpen, setColorMenuOpen] = useState(false);
+  const [exporting, setExporting] = useState(false);
+  const [exportError, setExportError] = useState<string | null>(null);
   const colorPopoverRef = useRef<HTMLDivElement | null>(null);
   const swatchRef = useRef<HTMLButtonElement | null>(null);
   const palette = PALETTES[paletteMode];
@@ -82,6 +88,19 @@ export function ChopInspector({
   }, [colorMenuOpen]);
 
   const displayNumber = chop.name?.trim() || String(chopIndex + 1);
+
+  const handleExport = async () => {
+    if (exporting || exportDisabled) return;
+    setExporting(true);
+    setExportError(null);
+    try {
+      await onExport();
+    } catch (error) {
+      setExportError(error instanceof Error ? error.message : "export failed");
+    } finally {
+      setExporting(false);
+    }
+  };
 
   return (
     <aside className="chop-inspector" aria-label="Chop inspector">
@@ -238,6 +257,24 @@ export function ChopInspector({
           </button>
         )}
       </div>
+
+      <button
+        type="button"
+        className="chop-inspector-export"
+        onClick={() => void handleExport()}
+        disabled={exportDisabled || exporting}
+        title="Download this chop as a WAV, including delay and reverb tail"
+      >
+        {exporting ? "EXPORTING…" : "EXPORT WAV"}
+      </button>
+      {exportError && (
+        <p className="hint chop-inspector-hint chop-inspector-export-error">
+          {exportError}
+        </p>
+      )}
+      <p className="hint chop-inspector-hint">
+        includes delay / reverb tail past the chop
+      </p>
 
       <button type="button" className="chop-inspector-duplicate" onClick={onDuplicate}>
         DUPLICATE CHOP
