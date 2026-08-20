@@ -155,13 +155,12 @@ export type ExportChopOptions = {
 
 /**
  * Render a chop through its insert effects (filter / delay / reverb), including
- * any tail that rings past the dry slice, and download it as a WAV.
+ * any tail that rings past the dry slice.
  */
-export async function exportChopWithEffects(
-  options: ExportChopOptions,
-): Promise<void> {
-  const { renderContext, buffer, trackId, trackName, chop, chopIndex } =
-    options;
+export async function renderChopWithEffects(
+  options: Omit<ExportChopOptions, "trackName" | "chopIndex">,
+): Promise<AudioBuffer> {
+  const { renderContext, buffer, trackId, chop } = options;
   const effects = normalizeMasterEffects(chop.effects);
   const natural = getChopNaturalDuration(chop);
   if (natural <= 0) {
@@ -221,7 +220,17 @@ export async function exportChopWithEffects(
     chop.reverse,
   );
 
-  const rendered = trimTrailingSilence(await offline.startRendering());
+  return trimTrailingSilence(await offline.startRendering());
+}
+
+/** Render a chop with its effects and download the result as a WAV. */
+export async function exportChopWithEffects(
+  options: ExportChopOptions,
+): Promise<void> {
+  const rendered = await renderChopWithEffects(options);
   const wav = audioBufferToWav(rendered);
-  triggerDownload(wav, chopExportFilename(trackName, chop, chopIndex));
+  triggerDownload(
+    wav,
+    chopExportFilename(options.trackName, options.chop, options.chopIndex),
+  );
 }
